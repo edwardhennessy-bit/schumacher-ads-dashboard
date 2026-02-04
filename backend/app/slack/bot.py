@@ -140,6 +140,7 @@ class SlackBot:
             ts = event["ts"]
 
             # Handle file uploads
+            files_processed = []
             if "files" in event and event["files"]:
                 logger.info("files_uploaded", count=len(event["files"]), channel=channel)
 
@@ -151,6 +152,7 @@ class SlackBot:
                             thread_ts=thread_ts,
                             file_info=file_info,
                         )
+                        files_processed.append(result)
 
                         if result.get("type") == "error":
                             await client.chat_postMessage(
@@ -186,8 +188,25 @@ class SlackBot:
                                 text=msg,
                             )
 
+            # Check if there's a text message along with the file upload that contains a question
+            text = event.get("text", "").strip()
+            # Remove any user/bot mentions from the text
+            clean_text = re.sub(r"<@[A-Z0-9]+>", "", text).strip()
+
+            # If files were uploaded and there's also a question, analyze immediately
+            if files_processed and clean_text and len(clean_text) > 5:
+                logger.info("file_upload_with_question", question=clean_text[:50])
+                await self.analyze_and_respond(
+                    client=client,
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    user_query=clean_text,
+                    mention_ts=ts,
+                )
+                return
+
             # Handle direct messages (not in channels)
-            elif channel_type == "im":
+            if channel_type == "im" and not files_processed:
                 text = event.get("text", "").strip()
                 if text:
                     # In DMs, treat every message as a query
@@ -255,10 +274,12 @@ class SlackBot:
 
     def get_thread_key(self, channel: str, thread_ts: Optional[str]) -> str:
         """Generate a unique key for thread context storage."""
-        return f"{channel}:{thread_ts or 'main'}"
+        # Use channel-level storage so files are accessible across all messages in the channel
+        # This ensures files uploaded in any message are available when the bot is mentioned
+        return f"{channel}:main"
 
     def get_thread_context(self, channel: str, thread_ts: Optional[str]) -> Dict[str, Any]:
-        """Get or create context for a thread."""
+        """Get or create context for a thread/channel."""
         key = self.get_thread_key(channel, thread_ts)
         if key not in self._thread_contexts:
             self._thread_contexts[key] = {
@@ -266,6 +287,7 @@ class SlackBot:
                 "user_context": [],
                 "last_analysis": None,
             }
+        logger.debug("get_thread_context", key=key, files_count=len(self._thread_contexts[key]["uploaded_files"]))
         return self._thread_contexts[key]
 
     def add_context_to_thread(
@@ -323,7 +345,15 @@ class SlackBot:
         ctx = self.get_thread_context(channel, thread_ts)
         ctx["uploaded_files"].append(processed)
 
-        logger.info("file_processed_and_stored", filename=filename, channel=channel)
+        logger.info(
+            "file_processed_and_stored",
+            filename=filename,
+            channel=channel,
+            thread_ts=thread_ts,
+            context_key=self.get_thread_key(channel, thread_ts),
+            total_files=len(ctx["uploaded_files"]),
+            file_type=processed.get("type"),
+        )
 
         return processed
 
@@ -430,6 +460,15 @@ class SlackBot:
 
             # Get thread context
             ctx = self.get_thread_context(channel, thread_ts)
+
+            logger.info(
+                "analysis_context_check",
+                channel=channel,
+                thread_ts=thread_ts,
+                context_key=self.get_thread_key(channel, thread_ts),
+                files_in_context=len(ctx["uploaded_files"]),
+                user_context_items=len(ctx["user_context"]),
+            )
 
             # Build additional context from uploaded files and user context
             additional_context_parts = []
