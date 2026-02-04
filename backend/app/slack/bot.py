@@ -521,11 +521,24 @@ At your service. I analyze paid media performance and optimize budget allocation
 
 *How to engage me:*
 - Mention me with a question: `@Jarvis How should I reallocate the remaining $50k?`
-- Upload a CSV, Excel, or PDF file with performance data
+- Upload files directly - I can process them automatically!
 - Add context: `@Jarvis context: Focus on lead generation this month`
+
+*File Processing - I can analyze:* :page_facing_up:
+- *CSV files* - Performance reports, exports from ad platforms
+- *Excel files* (.xlsx, .xls) - Multi-sheet workbooks with data
+- *PDF documents* - Reports, presentations, strategy briefs
+- *Word documents* (.docx) - Briefs, notes, strategy docs
+- *PowerPoint slides* (.pptx) - Presentations and slide decks
+- *Images* (.png, .jpg, .gif) - Screenshots, charts, visuals
+- *Text/Markdown* (.txt, .md) - Notes and documentation
+- *JSON files* - Data exports, API responses
+
+Just upload any of these files and I'll automatically extract and analyze the content. Then mention me with your question!
 
 *My capabilities:*
 - Real-time Meta Ads performance analysis (from Schumacher Dashboard)
+- File upload processing and analysis
 - Strategic budget reallocation with reasoning
 - Downloadable CSV reports
 - Contextual memory throughout our conversation
@@ -535,6 +548,7 @@ At your service. I analyze paid media performance and optimize budget allocation
 - "How should I split the remaining $25k budget?"
 - "Which campaigns should I pause?"
 - "Compare remarketing vs prospecting CPL"
+- _(upload a file)_ "Analyze this report and identify optimization opportunities"
 """
         await client.chat_postMessage(
             channel=channel,

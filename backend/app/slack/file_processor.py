@@ -2,6 +2,7 @@
 
 import io
 import json
+import base64
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
@@ -16,7 +17,12 @@ logger = structlog.get_logger(__name__)
 class FileProcessor:
     """Process various file formats to extract performance data and context."""
 
-    SUPPORTED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".pdf", ".docx", ".json"}
+    SUPPORTED_EXTENSIONS = {
+        ".csv", ".xlsx", ".xls", ".pdf", ".docx", ".json",
+        ".pptx",  # PowerPoint
+        ".png", ".jpg", ".jpeg", ".gif", ".webp",  # Images
+        ".txt", ".md",  # Text files
+    }
 
     def __init__(self):
         """Initialize the file processor."""
@@ -27,6 +33,14 @@ class FileProcessor:
             ".pdf": self._process_pdf,
             ".docx": self._process_docx,
             ".json": self._process_json,
+            ".pptx": self._process_pptx,
+            ".png": self._process_image,
+            ".jpg": self._process_image,
+            ".jpeg": self._process_image,
+            ".gif": self._process_image,
+            ".webp": self._process_image,
+            ".txt": self._process_text,
+            ".md": self._process_text,
         }
 
     def can_process(self, filename: str) -> bool:
@@ -253,3 +267,111 @@ class FileProcessor:
             return f"Object with keys: {', '.join(list(data.keys())[:10])}"
         else:
             return f"Value of type {type(data).__name__}"
+
+    async def _process_pptx(self, content: bytes, filename: str) -> Dict[str, Any]:
+        """Process a PowerPoint file."""
+        try:
+            from pptx import Presentation
+
+            prs = Presentation(io.BytesIO(content))
+            slides_content = []
+
+            for slide_num, slide in enumerate(prs.slides, 1):
+                slide_text = []
+                for shape in slide.shapes:
+                    if hasattr(shape, "text") and shape.text.strip():
+                        slide_text.append(shape.text.strip())
+
+                if slide_text:
+                    slides_content.append({
+                        "slide": slide_num,
+                        "content": "\n".join(slide_text),
+                    })
+
+            full_text = "\n\n---\n\n".join([
+                f"Slide {s['slide']}:\n{s['content']}"
+                for s in slides_content
+            ])
+
+            return {
+                "type": "document",
+                "filename": filename,
+                "format": "pptx",
+                "slide_count": len(prs.slides),
+                "text_content": full_text,
+                "slides": slides_content,
+            }
+        except ImportError:
+            logger.warning("pptx_library_not_installed", filename=filename)
+            return {
+                "type": "error",
+                "filename": filename,
+                "error": "PowerPoint processing not available (python-pptx not installed)",
+            }
+        except Exception as e:
+            logger.error("pptx_processing_error", filename=filename, error=str(e))
+            return {
+                "type": "error",
+                "filename": filename,
+                "error": str(e),
+            }
+
+    async def _process_image(self, content: bytes, filename: str) -> Dict[str, Any]:
+        """Process an image file - store as base64 for potential vision analysis."""
+        try:
+            ext = Path(filename).suffix.lower()
+            mime_types = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+            }
+            mime_type = mime_types.get(ext, "image/png")
+
+            # Encode as base64 for later use with vision models
+            base64_data = base64.b64encode(content).decode("utf-8")
+
+            return {
+                "type": "image",
+                "filename": filename,
+                "format": ext.lstrip("."),
+                "mime_type": mime_type,
+                "base64_data": base64_data,
+                "size_bytes": len(content),
+                "text_content": f"[Image file: {filename} - {len(content)/1024:.1f}KB {ext.upper()} image]",
+            }
+        except Exception as e:
+            logger.error("image_processing_error", filename=filename, error=str(e))
+            return {
+                "type": "error",
+                "filename": filename,
+                "error": str(e),
+            }
+
+    async def _process_text(self, content: bytes, filename: str) -> Dict[str, Any]:
+        """Process a plain text or markdown file."""
+        try:
+            # Try UTF-8 first, then fallback to latin-1
+            try:
+                text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                text = content.decode("latin-1")
+
+            ext = Path(filename).suffix.lower()
+
+            return {
+                "type": "document",
+                "filename": filename,
+                "format": "markdown" if ext == ".md" else "text",
+                "text_content": text,
+                "line_count": len(text.splitlines()),
+                "char_count": len(text),
+            }
+        except Exception as e:
+            logger.error("text_processing_error", filename=filename, error=str(e))
+            return {
+                "type": "error",
+                "filename": filename,
+                "error": str(e),
+            }
