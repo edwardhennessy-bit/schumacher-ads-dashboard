@@ -479,21 +479,75 @@ class SlackBot:
                 )
 
             for file_data in ctx["uploaded_files"]:
-                if file_data.get("type") == "performance_data":
+                file_type = file_data.get("type", "unknown")
+                filename = file_data.get("filename", "unknown")
+
+                if file_type in ("performance_data", "tabular"):
+                    # Handle CSV/Excel data files
+                    columns = file_data.get("columns", [])
+                    row_count = file_data.get("row_count", 0)
+                    data = file_data.get("data", [])
+
                     additional_context_parts.append(
-                        f"Uploaded file '{file_data['filename']}':\n"
-                        f"Columns: {', '.join(file_data['columns'])}\n"
-                        f"Row count: {file_data['row_count']}\n"
-                        f"Sample data provided."
+                        f"=== UPLOADED FILE: '{filename}' ===\n"
+                        f"Type: {file_type}\n"
+                        f"Columns: {', '.join(columns)}\n"
+                        f"Total rows: {row_count}\n"
                     )
-                    # Add a sample of the data
-                    if file_data.get("data"):
-                        sample = file_data["data"][:5]
-                        additional_context_parts.append(f"Sample rows: {sample}")
-                elif file_data.get("type") == "document":
+                    # Include ALL the data if it's reasonable size, otherwise sample
+                    if data:
+                        if len(data) <= 50:
+                            additional_context_parts.append(f"Complete data:\n{data}")
+                        else:
+                            additional_context_parts.append(f"First 20 rows:\n{data[:20]}")
+                            additional_context_parts.append(f"Last 10 rows:\n{data[-10:]}")
+
+                elif file_type == "spreadsheet":
+                    # Handle multi-sheet Excel files
+                    sheets = file_data.get("sheets", {})
+                    sheet_names = file_data.get("sheet_names", [])
                     additional_context_parts.append(
-                        f"Uploaded document '{file_data['filename']}':\n"
-                        f"{file_data.get('text_content', '')[:2000]}"
+                        f"=== UPLOADED SPREADSHEET: '{filename}' ===\n"
+                        f"Sheets: {', '.join(sheet_names)}\n"
+                    )
+                    for sheet_name, sheet_data in sheets.items():
+                        if sheet_data:
+                            additional_context_parts.append(
+                                f"\n--- Sheet '{sheet_name}' ({len(sheet_data)} rows) ---\n"
+                                f"{sheet_data[:20] if len(sheet_data) > 20 else sheet_data}"
+                            )
+
+                elif file_type == "document":
+                    # Handle PDFs, Word docs, text files
+                    text_content = file_data.get("text_content", "")
+                    additional_context_parts.append(
+                        f"=== UPLOADED DOCUMENT: '{filename}' ===\n"
+                        f"Format: {file_data.get('format', 'unknown')}\n"
+                        f"Content:\n{text_content[:4000]}"
+                    )
+
+                elif file_type == "json":
+                    # Handle JSON files
+                    json_data = file_data.get("data", {})
+                    additional_context_parts.append(
+                        f"=== UPLOADED JSON: '{filename}' ===\n"
+                        f"Data:\n{json_data}"
+                    )
+
+                elif file_type == "image":
+                    # For images, just note that we have it
+                    additional_context_parts.append(
+                        f"=== UPLOADED IMAGE: '{filename}' ===\n"
+                        f"Format: {file_data.get('format', 'unknown')}\n"
+                        f"Size: {file_data.get('size_bytes', 0) / 1024:.1f} KB\n"
+                        f"(Image content available for visual analysis)"
+                    )
+
+                else:
+                    # Unknown type - include what we can
+                    additional_context_parts.append(
+                        f"=== UPLOADED FILE: '{filename}' (type: {file_type}) ===\n"
+                        f"Data: {str(file_data)[:2000]}"
                     )
 
             additional_context = "\n\n".join(additional_context_parts) if additional_context_parts else None
