@@ -14,6 +14,7 @@ load_dotenv(_env_file, override=True)
 class Settings(BaseSettings):
     # Meta Ads
     meta_ad_account_id: str = ""
+    meta_access_token: str = Field(default="", description="Meta Graph API Access Token")
 
     # Claude API
     anthropic_api_key: str = ""

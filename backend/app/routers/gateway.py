@@ -2,7 +2,7 @@
 Gateway API Router - Proxy endpoints for fetching live ad platform data.
 
 These endpoints allow the JARVIS bot to fetch real-time data from
-Meta, Google Ads, and other platforms via the MCP Gateway.
+Meta, Google Ads, and other platforms via direct API calls or MCP Gateway.
 """
 
 import os
@@ -12,12 +12,16 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from datetime import datetime
 
+from app.services.live_api import LiveAPIService, DateRange
+from app.config import get_settings
+
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/gateway", tags=["gateway"])
 
 # MCP Gateway configuration
-MCP_GATEWAY_URL = os.getenv("MCP_GATEWAY_URL", "http://localhost:3001")
+MCP_GATEWAY_URL = os.getenv("MCP_GATEWAY_URL", "https://gatewayapi-production.up.railway.app")
+MCP_GATEWAY_TOKEN = os.getenv("MCP_GATEWAY_TOKEN", "sg_NDhjNzU3NjctMGZhZC00MDQzLTg3MzctMzkzYjZl")
 
 
 @router.get("/meta/account-insights")
@@ -29,7 +33,7 @@ async def get_meta_account_insights(
     """
     Fetch Meta account insights for a specific date range.
 
-    This endpoint proxies requests to the MCP Gateway to get live Meta Ads data.
+    This endpoint uses the LiveAPIService to fetch data directly from Meta Graph API.
     """
     logger.info(
         "meta_account_insights_request",
@@ -39,40 +43,42 @@ async def get_meta_account_insights(
     )
 
     try:
-        # Call MCP Gateway to get Meta account insights
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{MCP_GATEWAY_URL}/tools/meta_account_insights",
-                json={
-                    "adAccountId": account_id,
-                    "startDate": start_date,
-                    "endDate": end_date,
-                }
-            )
+        settings = get_settings()
 
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "success": True,
-                    "account_id": account_id,
-                    "date_range": {"start": start_date, "end": end_date},
-                    "data": data,
-                }
-            else:
-                logger.warning("mcp_gateway_error", status=response.status_code)
-                return {
-                    "success": False,
-                    "error": f"Gateway returned status {response.status_code}",
-                }
+        # Check if Meta access token is configured
+        if not settings.meta_access_token:
+            logger.warning("meta_token_not_configured")
+            return {
+                "success": False,
+                "error": "Meta access token not configured",
+                "message": "Please configure META_ACCESS_TOKEN in your .env file to enable live data fetching.",
+            }
 
-    except httpx.ConnectError:
-        logger.warning("mcp_gateway_unavailable")
-        # Return mock data or indicate gateway unavailable
-        return {
-            "success": False,
-            "error": "MCP Gateway not available",
-            "message": "Live data fetch unavailable. Using cached data.",
-        }
+        # Use LiveAPIService to fetch data
+        service = LiveAPIService(meta_access_token=settings.meta_access_token)
+        date_range = DateRange(start_date=start_date, end_date=end_date)
+
+        result = await service.get_meta_account_insights(
+            account_id=account_id,
+            date_range=date_range,
+            level="account"
+        )
+
+        if result.get("success"):
+            return {
+                "success": True,
+                "account_id": account_id,
+                "date_range": {"start": start_date, "end": end_date},
+                "data": result.get("data", []),
+            }
+        else:
+            logger.warning("meta_api_failed", error=result.get("error"))
+            return {
+                "success": False,
+                "error": result.get("error", "Unknown error"),
+                "detail": result.get("detail", ""),
+            }
+
     except Exception as e:
         logger.error("meta_insights_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -95,35 +101,38 @@ async def get_meta_campaign_report(
     )
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{MCP_GATEWAY_URL}/tools/meta_campaign_report",
-                json={
-                    "adAccountId": account_id,
-                    "startDate": start_date,
-                    "endDate": end_date,
-                }
-            )
+        settings = get_settings()
 
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "success": True,
-                    "account_id": account_id,
-                    "date_range": {"start": start_date, "end": end_date},
-                    "campaigns": data,
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": f"Gateway returned status {response.status_code}",
-                }
+        # Check if Meta access token is configured
+        if not settings.meta_access_token:
+            logger.warning("meta_token_not_configured")
+            return {
+                "success": False,
+                "error": "Meta access token not configured",
+            }
 
-    except httpx.ConnectError:
-        return {
-            "success": False,
-            "error": "MCP Gateway not available",
-        }
+        # Use LiveAPIService to fetch campaign data
+        service = LiveAPIService(meta_access_token=settings.meta_access_token)
+        date_range = DateRange(start_date=start_date, end_date=end_date)
+
+        result = await service.get_meta_campaigns(
+            account_id=account_id,
+            date_range=date_range
+        )
+
+        if result.get("success"):
+            return {
+                "success": True,
+                "account_id": account_id,
+                "date_range": {"start": start_date, "end": end_date},
+                "campaigns": result.get("campaigns", []),
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.get("error", "Unknown error"),
+            }
+
     except Exception as e:
         logger.error("campaign_report_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))

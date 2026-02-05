@@ -18,12 +18,13 @@ from .analyst import AnthropicAnalyst
 from .file_processor import FileProcessor
 from .utils import parse_budget_table_from_response, clean_response_for_slack, generate_reports
 from app.services.meta_ads import MetaAdsService
-from app.services.gateway_api import (
-    GatewayAPIService,
+from app.services.live_api import (
+    LiveAPIService,
     parse_date_range_from_query,
     get_account_id_from_query,
     DateRange,
 )
+from app.config import get_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -61,8 +62,9 @@ class SlackBot:
         # Initialize services - shared with dashboard
         self.meta_service = MetaAdsService()
 
-        # Initialize Gateway API service for live data queries
-        self.gateway_api = GatewayAPIService()
+        # Initialize Live API service for direct Meta Graph API calls
+        settings = get_settings()
+        self.live_api = LiveAPIService(meta_access_token=settings.meta_access_token)
 
         # Initialize AI analyst
         self.analyst = AnthropicAnalyst(api_key=anthropic_api_key)
@@ -442,73 +444,6 @@ class SlackBot:
 
         return performance_data
 
-    def _format_live_data_context(
-        self,
-        insights_data: Dict[str, Any],
-        date_range: "DateRange",
-    ) -> str:
-        """Format live API data as context for the AI analyst."""
-        lines = [
-            "=== LIVE API DATA ===",
-            f"Account: {insights_data.get('account_id', 'Unknown')}",
-            f"Date Range: {date_range.start_date} to {date_range.end_date}",
-            "",
-        ]
-
-        data = insights_data.get("data", {})
-        if not data:
-            lines.append("No data available for this date range.")
-            return "\n".join(lines)
-
-        # Format the metrics
-        if isinstance(data, dict):
-            spend = float(data.get("spend", 0))
-            impressions = int(data.get("impressions", 0))
-            clicks = int(data.get("clicks", 0))
-            reach = int(data.get("reach", 0))
-            ctr = float(data.get("ctr", 0))
-            cpc = float(data.get("cpc", 0))
-            cpm = float(data.get("cpm", 0))
-
-            # Extract leads from actions if present
-            leads = 0
-            actions = data.get("actions", [])
-            if isinstance(actions, list):
-                for action in actions:
-                    if action.get("action_type") == "lead":
-                        leads = int(action.get("value", 0))
-                        break
-
-            cpl = spend / leads if leads > 0 else 0
-
-            lines.extend([
-                "### Performance Summary",
-                f"- **Spend**: ${spend:,.2f}",
-                f"- **Impressions**: {impressions:,}",
-                f"- **Clicks**: {clicks:,}",
-                f"- **Reach**: {reach:,}",
-                f"- **CTR**: {ctr:.2f}%",
-                f"- **CPC**: ${cpc:.2f}",
-                f"- **CPM**: ${cpm:.2f}",
-                f"- **Leads**: {leads:,}",
-                f"- **Cost Per Lead**: ${cpl:.2f}",
-            ])
-        elif isinstance(data, list):
-            # Multiple records (campaign level)
-            lines.append("### Campaign Performance")
-            for record in data[:20]:  # Limit to 20 campaigns
-                name = record.get("campaign_name", "Unknown")
-                spend = float(record.get("spend", 0))
-                leads = 0
-                for action in record.get("actions", []):
-                    if action.get("action_type") == "lead":
-                        leads = int(action.get("value", 0))
-                        break
-                cpl = spend / leads if leads > 0 else 0
-                lines.append(f"- **{name}**: ${spend:,.2f} spend, {leads} leads, ${cpl:.2f} CPL")
-
-        return "\n".join(lines)
-
     async def analyze_and_respond(
         self,
         client: AsyncWebClient,
@@ -533,7 +468,7 @@ class SlackBot:
             live_api_context = None
 
             if date_range:
-                # User requested specific date range - fetch live data
+                # User requested specific date range - fetch live data via Meta Graph API
                 logger.info(
                     "fetching_live_data",
                     date_range=f"{date_range.start_date} to {date_range.end_date}",
@@ -547,42 +482,63 @@ class SlackBot:
                 await client.chat_update(
                     channel=channel,
                     ts=thinking_msg["ts"],
-                    text=f":hourglass_flowing_sand: Fetching live data for {date_range.start_date} to {date_range.end_date}...",
+                    text=f":hourglass_flowing_sand: Fetching live Meta data for {date_range.start_date} to {date_range.end_date}...",
                 )
 
-                # Fetch live data via internal API endpoint
+                # Fetch live data directly from Meta Graph API
                 try:
-                    async with httpx.AsyncClient(timeout=30.0) as http_client:
-                        # Call our own gateway endpoint
-                        insights_response = await http_client.get(
-                            "http://localhost:8001/api/gateway/meta/account-insights",
-                            params={
-                                "account_id": account_id,
-                                "start_date": date_range.start_date,
-                                "end_date": date_range.end_date,
-                            }
-                        )
+                    # First get account-level insights
+                    insights_data = await self.live_api.get_meta_account_insights(
+                        account_id=account_id,
+                        date_range=date_range,
+                        level="account"
+                    )
 
-                        if insights_response.status_code == 200:
-                            insights_data = insights_response.json()
-                            if insights_data.get("success"):
-                                live_api_context = self._format_live_data_context(
-                                    insights_data,
-                                    date_range
-                                )
-                            else:
-                                # Gateway unavailable - note this in context
-                                live_api_context = (
-                                    f"=== DATE RANGE REQUESTED ===\n"
-                                    f"Period: {date_range.start_date} to {date_range.end_date}\n"
-                                    f"Note: Live data fetch not available. Analyzing with cached dashboard data.\n"
-                                )
+                    if insights_data.get("success"):
+                        live_api_context = self.live_api.format_insights_for_context(insights_data)
+
+                        # Also get campaign-level data for detailed analysis
+                        campaign_data = await self.live_api.get_meta_campaigns(
+                            account_id=account_id,
+                            date_range=date_range
+                        )
+                        if campaign_data.get("success"):
+                            live_api_context += "\n\n" + self.live_api.format_campaigns_for_context(campaign_data)
+
+                        logger.info(
+                            "live_data_fetched_successfully",
+                            account_id=account_id,
+                            date_range=f"{date_range.start_date} to {date_range.end_date}"
+                        )
+                    else:
+                        # API call failed - note this in context
+                        error_msg = insights_data.get("error", "Unknown error")
+                        logger.warning("live_data_fetch_failed", error=error_msg)
+
+                        # Provide more context about the configuration issue
+                        if "token" in error_msg.lower() or "configured" in error_msg.lower():
+                            live_api_context = (
+                                f"=== DATE RANGE REQUESTED ===\n"
+                                f"Period: {date_range.start_date} to {date_range.end_date}\n"
+                                f"Account: {account_id}\n"
+                                f"Note: Meta API access token needs to be configured. "
+                                f"Please set META_ACCESS_TOKEN in the .env file. "
+                                f"Get a token from: https://developers.facebook.com/tools/explorer/\n"
+                                f"Analyzing with cached dashboard data instead.\n"
+                            )
+                        else:
+                            live_api_context = (
+                                f"=== DATE RANGE REQUESTED ===\n"
+                                f"Period: {date_range.start_date} to {date_range.end_date}\n"
+                                f"Account: {account_id}\n"
+                                f"Note: Live data fetch failed ({error_msg}). Analyzing with cached dashboard data.\n"
+                            )
                 except Exception as e:
                     logger.warning("live_data_fetch_error", error=str(e))
                     live_api_context = (
                         f"=== DATE RANGE REQUESTED ===\n"
                         f"Period: {date_range.start_date} to {date_range.end_date}\n"
-                        f"Note: Could not fetch live data. Using available dashboard data.\n"
+                        f"Note: Could not fetch live data ({str(e)}). Using available dashboard data.\n"
                     )
 
                 logger.info("live_data_context_built", has_context=bool(live_api_context))
@@ -769,17 +725,26 @@ At your service. I analyze paid media performance and optimize budget allocation
 Just upload any of these files and I'll automatically extract and analyze the content. Then mention me with your question!
 
 *My capabilities:*
-- Real-time Meta Ads performance analysis (from Schumacher Dashboard)
+- Real-time Meta Ads performance analysis with custom date ranges
 - File upload processing and analysis
 - Strategic budget reallocation with reasoning
 - Downloadable CSV reports
 - Contextual memory throughout our conversation
 
+*Date Ranges I support:* :calendar:
+- "last 7 days", "last 14 days", "last 30 days", "last 60 days", "last 90 days"
+- "this month" or "MTD" (month to date)
+- "last month" (previous calendar month)
+- "YTD" (year to date)
+- Specific months like "January", "February 2026"
+
 *Example queries:*
 - "Analyze current campaign performance and suggest optimizations"
+- "How did we perform last 7 days?"
+- "Show me January performance data"
+- "Compare MTD vs last month"
 - "How should I split the remaining $25k budget?"
 - "Which campaigns should I pause?"
-- "Compare remarketing vs prospecting CPL"
 - _(upload a file)_ "Analyze this report and identify optimization opportunities"
 """
         await client.chat_postMessage(
