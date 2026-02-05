@@ -18,6 +18,12 @@ from .analyst import AnthropicAnalyst
 from .file_processor import FileProcessor
 from .utils import parse_budget_table_from_response, clean_response_for_slack, generate_reports
 from app.services.meta_ads import MetaAdsService
+from app.services.gateway_api import (
+    GatewayAPIService,
+    parse_date_range_from_query,
+    get_account_id_from_query,
+    DateRange,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -54,6 +60,9 @@ class SlackBot:
 
         # Initialize services - shared with dashboard
         self.meta_service = MetaAdsService()
+
+        # Initialize Gateway API service for live data queries
+        self.gateway_api = GatewayAPIService()
 
         # Initialize AI analyst
         self.analyst = AnthropicAnalyst(api_key=anthropic_api_key)
@@ -433,6 +442,73 @@ class SlackBot:
 
         return performance_data
 
+    def _format_live_data_context(
+        self,
+        insights_data: Dict[str, Any],
+        date_range: "DateRange",
+    ) -> str:
+        """Format live API data as context for the AI analyst."""
+        lines = [
+            "=== LIVE API DATA ===",
+            f"Account: {insights_data.get('account_id', 'Unknown')}",
+            f"Date Range: {date_range.start_date} to {date_range.end_date}",
+            "",
+        ]
+
+        data = insights_data.get("data", {})
+        if not data:
+            lines.append("No data available for this date range.")
+            return "\n".join(lines)
+
+        # Format the metrics
+        if isinstance(data, dict):
+            spend = float(data.get("spend", 0))
+            impressions = int(data.get("impressions", 0))
+            clicks = int(data.get("clicks", 0))
+            reach = int(data.get("reach", 0))
+            ctr = float(data.get("ctr", 0))
+            cpc = float(data.get("cpc", 0))
+            cpm = float(data.get("cpm", 0))
+
+            # Extract leads from actions if present
+            leads = 0
+            actions = data.get("actions", [])
+            if isinstance(actions, list):
+                for action in actions:
+                    if action.get("action_type") == "lead":
+                        leads = int(action.get("value", 0))
+                        break
+
+            cpl = spend / leads if leads > 0 else 0
+
+            lines.extend([
+                "### Performance Summary",
+                f"- **Spend**: ${spend:,.2f}",
+                f"- **Impressions**: {impressions:,}",
+                f"- **Clicks**: {clicks:,}",
+                f"- **Reach**: {reach:,}",
+                f"- **CTR**: {ctr:.2f}%",
+                f"- **CPC**: ${cpc:.2f}",
+                f"- **CPM**: ${cpm:.2f}",
+                f"- **Leads**: {leads:,}",
+                f"- **Cost Per Lead**: ${cpl:.2f}",
+            ])
+        elif isinstance(data, list):
+            # Multiple records (campaign level)
+            lines.append("### Campaign Performance")
+            for record in data[:20]:  # Limit to 20 campaigns
+                name = record.get("campaign_name", "Unknown")
+                spend = float(record.get("spend", 0))
+                leads = 0
+                for action in record.get("actions", []):
+                    if action.get("action_type") == "lead":
+                        leads = int(action.get("value", 0))
+                        break
+                cpl = spend / leads if leads > 0 else 0
+                lines.append(f"- **{name}**: ${spend:,.2f} spend, {leads} leads, ${cpl:.2f} CPL")
+
+        return "\n".join(lines)
+
     async def analyze_and_respond(
         self,
         client: AsyncWebClient,
@@ -452,10 +528,69 @@ class SlackBot:
         )
 
         try:
+            # Check if user is requesting a specific date range
+            date_range = parse_date_range_from_query(user_query)
+            live_api_context = None
+
+            if date_range:
+                # User requested specific date range - fetch live data
+                logger.info(
+                    "fetching_live_data",
+                    date_range=f"{date_range.start_date} to {date_range.end_date}",
+                    query=user_query[:50]
+                )
+
+                # Determine which account to query
+                account_id = get_account_id_from_query(user_query)
+
+                # Update thinking message
+                await client.chat_update(
+                    channel=channel,
+                    ts=thinking_msg["ts"],
+                    text=f":hourglass_flowing_sand: Fetching live data for {date_range.start_date} to {date_range.end_date}...",
+                )
+
+                # Fetch live data via internal API endpoint
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as http_client:
+                        # Call our own gateway endpoint
+                        insights_response = await http_client.get(
+                            "http://localhost:8001/api/gateway/meta/account-insights",
+                            params={
+                                "account_id": account_id,
+                                "start_date": date_range.start_date,
+                                "end_date": date_range.end_date,
+                            }
+                        )
+
+                        if insights_response.status_code == 200:
+                            insights_data = insights_response.json()
+                            if insights_data.get("success"):
+                                live_api_context = self._format_live_data_context(
+                                    insights_data,
+                                    date_range
+                                )
+                            else:
+                                # Gateway unavailable - note this in context
+                                live_api_context = (
+                                    f"=== DATE RANGE REQUESTED ===\n"
+                                    f"Period: {date_range.start_date} to {date_range.end_date}\n"
+                                    f"Note: Live data fetch not available. Analyzing with cached dashboard data.\n"
+                                )
+                except Exception as e:
+                    logger.warning("live_data_fetch_error", error=str(e))
+                    live_api_context = (
+                        f"=== DATE RANGE REQUESTED ===\n"
+                        f"Period: {date_range.start_date} to {date_range.end_date}\n"
+                        f"Note: Could not fetch live data. Using available dashboard data.\n"
+                    )
+
+                logger.info("live_data_context_built", has_context=bool(live_api_context))
+
             # Fetch performance data from the integrated dashboard service
             performance_data = self._get_performance_data_from_dashboard()
 
-            if not performance_data:
+            if not performance_data and not live_api_context:
                 logger.info("no_dashboard_data", message="Using file uploads only")
 
             # Get thread context
@@ -549,6 +684,10 @@ class SlackBot:
                         f"=== UPLOADED FILE: '{filename}' (type: {file_type}) ===\n"
                         f"Data: {str(file_data)[:2000]}"
                     )
+
+            # Add live API data to context if we fetched it
+            if live_api_context:
+                additional_context_parts.insert(0, live_api_context)
 
             additional_context = "\n\n".join(additional_context_parts) if additional_context_parts else None
 

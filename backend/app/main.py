@@ -11,6 +11,7 @@ import structlog
 
 from app.config import get_settings
 from app.routers import metrics_router, campaigns_router, audits_router, reports_router
+from app.routers.gateway import router as gateway_router
 
 settings = get_settings()
 
@@ -118,6 +119,7 @@ app.include_router(metrics_router)
 app.include_router(campaigns_router)
 app.include_router(audits_router)
 app.include_router(reports_router)
+app.include_router(gateway_router)
 
 
 @app.get("/")
