@@ -10,7 +10,7 @@ from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 import structlog
 
 from app.config import get_settings
-from app.routers import metrics_router, campaigns_router, audits_router, reports_router
+from app.routers import metrics_router, campaigns_router, audits_router, reports_router, chat_router
 from app.routers.gateway import router as gateway_router
 
 settings = get_settings()
@@ -120,6 +120,7 @@ app.include_router(campaigns_router)
 app.include_router(audits_router)
 app.include_router(reports_router)
 app.include_router(gateway_router)
+app.include_router(chat_router)
 
 
 @app.get("/")

@@ -9,6 +9,7 @@ import {
   Bell,
   Settings,
   Home,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +18,11 @@ const navItems = [
     label: "Dashboard",
     href: "/",
     icon: LayoutDashboard,
+  },
+  {
+    label: "JARVIS",
+    href: "/jarvis",
+    icon: Bot,
   },
   {
     label: "Campaigns",
