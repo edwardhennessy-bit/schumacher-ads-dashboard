@@ -149,7 +149,7 @@ async def api_status():
     """Get API status and configuration info."""
     return {
         "meta_connected": bool(settings.meta_ad_account_id),
-        "google_connected": bool(settings.google_ads_developer_token),
+        "google_connected": bool(settings.gateway_token or settings.google_ads_developer_token),
         "microsoft_connected": False,  # placeholder for future
         "claude_connected": bool(settings.anthropic_api_key),
         "slack_webhook_connected": bool(settings.slack_webhook_url),

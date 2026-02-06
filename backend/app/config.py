@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     meta_ad_account_id: str = ""
     meta_access_token: str = Field(default="", description="Meta Graph API Access Token")
 
+    # MCP Gateway
+    gateway_url: str = Field(default="https://gatewayapi-production.up.railway.app", description="MCP Gateway URL")
+    gateway_token: str = Field(default="", description="MCP Gateway Bearer Token")
+
     # Google Ads
     google_ads_developer_token: str = Field(default="", description="Google Ads API Developer Token")
     google_ads_client_id: str = Field(default="", description="Google OAuth2 Client ID")

@@ -1,12 +1,12 @@
 """
 Google Ads Metrics Router — dashboard endpoints for Google Ads data.
 
-Mirrors the structure of the Meta metrics router so the frontend
-can use the same component patterns for both platforms.
+Uses the MCP Gateway as the primary data source for Google Ads metrics.
+Falls back to direct Google Ads REST API if OAuth credentials are configured.
 """
 
 from fastapi import APIRouter, Query
-from typing import List, Optional
+from typing import Optional
 import asyncio
 import structlog
 
@@ -14,8 +14,8 @@ from app.models.schemas import MetricsOverview, DailyMetric, Campaign
 from app.services.google_ads_api import (
     GoogleAdsService,
     SCHUMACHER_GOOGLE_CUSTOMER_ID,
-    transform_gateway_campaign_data,
 )
+from app.services.mcp_client import get_mcp_client
 from app.services.live_api import DateRange
 from app.config import get_settings
 
@@ -25,9 +25,18 @@ router = APIRouter(prefix="/api/google", tags=["google-ads"])
 
 
 def _get_google_service() -> GoogleAdsService:
-    """Create a GoogleAdsService with credentials from settings."""
+    """Create a GoogleAdsService with gateway client + optional direct credentials."""
     settings = get_settings()
+
+    # Primary: MCP Gateway
+    mcp_client = get_mcp_client(
+        gateway_url=settings.gateway_url if hasattr(settings, "gateway_url") else "",
+        gateway_token=settings.gateway_token if hasattr(settings, "gateway_token") else "",
+    )
+
+    # Fallback: Direct API credentials
     return GoogleAdsService(
+        mcp_client=mcp_client if mcp_client.is_configured else None,
         developer_token=settings.google_ads_developer_token,
         client_id=settings.google_ads_client_id,
         client_secret=settings.google_ads_client_secret,
@@ -49,7 +58,7 @@ async def get_google_overview(
 ):
     """Get Google Ads account-level metrics overview."""
     if not start_date or not end_date:
-        return MetricsOverview()  # empty defaults
+        return MetricsOverview()
 
     settings = get_settings()
     customer_id = settings.google_ads_customer_id or SCHUMACHER_GOOGLE_CUSTOMER_ID
@@ -169,5 +178,6 @@ async def get_google_status():
     settings = get_settings()
     return {
         "configured": service.is_configured,
+        "source": "gateway" if service.has_gateway else ("direct_api" if service.has_direct_api else "none"),
         "customer_id": settings.google_ads_customer_id or SCHUMACHER_GOOGLE_CUSTOMER_ID,
     }

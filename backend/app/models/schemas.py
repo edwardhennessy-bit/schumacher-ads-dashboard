@@ -4,27 +4,27 @@ from typing import Optional, Literal
 
 
 class MetricsOverview(BaseModel):
-    spend: float
-    spend_change: float
-    impressions: int
-    impressions_change: float
-    clicks: int
-    clicks_change: float
-    ctr: float
-    ctr_change: float
-    cpc: float
-    cpc_change: float
-    cpm: float
-    cpm_change: float
-    conversions: int
-    conversions_change: float
+    spend: float = 0
+    spend_change: float = 0
+    impressions: int = 0
+    impressions_change: float = 0
+    clicks: int = 0
+    clicks_change: float = 0
+    ctr: float = 0
+    ctr_change: float = 0
+    cpc: float = 0
+    cpc_change: float = 0
+    cpm: float = 0
+    cpm_change: float = 0
+    conversions: int = 0
+    conversions_change: float = 0
     # Lead metrics
-    leads: int
-    leads_change: float
-    cost_per_lead: float
-    cost_per_lead_change: float
-    lead_rate: float  # leads / clicks as percentage
-    lead_rate_change: float
+    leads: int = 0
+    leads_change: float = 0
+    cost_per_lead: float = 0
+    cost_per_lead_change: float = 0
+    lead_rate: float = 0  # leads / clicks as percentage
+    lead_rate_change: float = 0
     # Segmented CPL metrics
     remarketing_leads: int = 0
     remarketing_spend: float = 0
@@ -33,8 +33,8 @@ class MetricsOverview(BaseModel):
     prospecting_spend: float = 0
     prospecting_cpl: float = 0
     # Ad inventory
-    active_ads: int
-    total_ads: int
+    active_ads: int = 0
+    total_ads: int = 0
     active_ads_threshold: int = 250
 
 
