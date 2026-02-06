@@ -11,11 +11,11 @@ interface HeaderProps {
   subtitle?: string;
   onRefresh?: () => void;
   isLoading?: boolean;
-  // Date range props
-  selectedPreset: string;
-  customRange: DateRange | null;
-  onPresetChange: (preset: string) => void;
-  onCustomRangeChange: (range: DateRange) => void;
+  // Date range props (optional — pages without date filtering can omit)
+  selectedPreset?: string;
+  customRange?: DateRange | null;
+  onPresetChange?: (preset: string) => void;
+  onCustomRangeChange?: (range: DateRange) => void;
 }
 
 export function Header({
@@ -105,12 +105,14 @@ export function Header({
         </div>
 
         {/* Date Range Selector */}
-        <DateRangeSelector
-          selectedPreset={selectedPreset}
-          customRange={customRange}
-          onPresetChange={onPresetChange}
-          onCustomRangeChange={onCustomRangeChange}
-        />
+        {selectedPreset && onPresetChange && onCustomRangeChange && (
+          <DateRangeSelector
+            selectedPreset={selectedPreset}
+            customRange={customRange ?? null}
+            onPresetChange={onPresetChange}
+            onCustomRangeChange={onCustomRangeChange}
+          />
+        )}
 
         {/* Refresh Button */}
         {onRefresh && (

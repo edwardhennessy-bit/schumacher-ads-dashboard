@@ -3,31 +3,20 @@
 import { useState, useEffect, useCallback } from "react";
 import { Header } from "@/components/layout/Header";
 import { MetricCard } from "@/components/dashboard/MetricCard";
-import { TrendChart } from "@/components/dashboard/TrendChart";
-import { CampaignTable } from "@/components/dashboard/CampaignTable";
-import { AlertsFeed } from "@/components/dashboard/AlertsFeed";
 import {
   DollarSign,
-  MousePointer,
-  Eye,
-  Target,
-  TrendingUp,
-  Layers,
-  Users,
   UserPlus,
-  RefreshCw,
-  Megaphone,
+  Users,
+  TrendingUp,
+  Facebook,
+  Search,
+  Monitor,
 } from "lucide-react";
 import {
-  mockMetricsOverview,
-  mockTrendData,
-  mockCampaigns,
-  mockAuditAlerts,
   formatCurrency,
   formatNumber,
-  formatPercent,
 } from "@/lib/mock-data";
-import { api, MetricsOverview, DailyMetric, Campaign, AuditAlert } from "@/lib/api";
+import { api, MetricsOverview } from "@/lib/api";
 import {
   DateRange,
   DEFAULT_PRESET,
@@ -35,104 +24,47 @@ import {
   formatDateRangeLabel,
 } from "@/lib/date-range";
 
-// Transform API response to match frontend types
-function transformMetrics(apiMetrics: MetricsOverview) {
+interface PlatformSummary {
+  spend: number;
+  spendChange: number;
+  leads: number;
+  leadsChange: number;
+  cpl: number;
+  cplChange: number;
+  connected: boolean;
+}
+
+const emptyPlatform: PlatformSummary = {
+  spend: 0,
+  spendChange: 0,
+  leads: 0,
+  leadsChange: 0,
+  cpl: 0,
+  cplChange: 0,
+  connected: false,
+};
+
+function toPlatform(m: MetricsOverview, connected: boolean): PlatformSummary {
   return {
-    spend: apiMetrics.spend,
-    spendChange: apiMetrics.spend_change,
-    impressions: apiMetrics.impressions,
-    impressionsChange: apiMetrics.impressions_change,
-    clicks: apiMetrics.clicks,
-    clicksChange: apiMetrics.clicks_change,
-    ctr: apiMetrics.ctr,
-    ctrChange: apiMetrics.ctr_change,
-    cpc: apiMetrics.cpc,
-    cpcChange: apiMetrics.cpc_change,
-    cpm: apiMetrics.cpm,
-    cpmChange: apiMetrics.cpm_change,
-    conversions: apiMetrics.conversions,
-    conversionsChange: apiMetrics.conversions_change,
-    // Lead metrics
-    leads: apiMetrics.leads,
-    leadsChange: apiMetrics.leads_change,
-    costPerLead: apiMetrics.cost_per_lead,
-    costPerLeadChange: apiMetrics.cost_per_lead_change,
-    leadRate: apiMetrics.lead_rate,
-    leadRateChange: apiMetrics.lead_rate_change,
-    // Segmented CPL
-    remarketingLeads: apiMetrics.remarketing_leads,
-    remarketingSpend: apiMetrics.remarketing_spend,
-    remarketingCpl: apiMetrics.remarketing_cpl,
-    prospectingLeads: apiMetrics.prospecting_leads,
-    prospectingSpend: apiMetrics.prospecting_spend,
-    prospectingCpl: apiMetrics.prospecting_cpl,
-    // Ad inventory
-    activeAds: apiMetrics.active_ads,
-    totalAds: apiMetrics.total_ads,
-    activeAdsThreshold: apiMetrics.active_ads_threshold,
+    spend: m.spend,
+    spendChange: m.spend_change,
+    leads: m.leads,
+    leadsChange: m.leads_change,
+    cpl: m.cost_per_lead,
+    cplChange: m.cost_per_lead_change,
+    connected,
   };
 }
 
-function transformTrend(t: DailyMetric) {
-  return {
-    date: t.date,
-    spend: t.spend,
-    impressions: t.impressions,
-    clicks: t.clicks,
-    conversions: t.conversions,
-    leads: t.leads,
-    costPerLead: t.cost_per_lead,
-  };
-}
-
-function transformCampaign(c: Campaign) {
-  return {
-    id: c.id,
-    name: c.name,
-    status: c.status,
-    objective: c.objective,
-    spend: c.spend,
-    impressions: c.impressions,
-    clicks: c.clicks,
-    ctr: c.ctr,
-    cpc: c.cpc,
-    conversions: c.conversions,
-    costPerConversion: c.cost_per_conversion,
-    // Lead metrics
-    leads: c.leads,
-    costPerLead: c.cost_per_lead,
-    leadRate: c.lead_rate,
-  };
-}
-
-function transformAlert(a: AuditAlert) {
-  return {
-    id: a.id,
-    type: a.type,
-    severity: a.severity,
-    adId: a.ad_id,
-    adName: a.ad_name,
-    campaignName: a.campaign_name,
-    message: a.message,
-    recommendation: a.recommendation,
-    createdAt: a.created_at,
-    acknowledged: a.acknowledged,
-  };
-}
-
-export default function DashboardPage() {
-  const [metrics, setMetrics] = useState(mockMetricsOverview);
-  const [trends, setTrends] = useState(mockTrendData);
-  const [campaigns, setCampaigns] = useState(mockCampaigns);
-  const [alerts, setAlerts] = useState(mockAuditAlerts);
+export default function OverviewPage() {
+  const [meta, setMeta] = useState<PlatformSummary>(emptyPlatform);
+  const [google, setGoogle] = useState<PlatformSummary>(emptyPlatform);
+  const [microsoft] = useState<PlatformSummary>(emptyPlatform); // placeholder
   const [isLoading, setIsLoading] = useState(false);
-  const [apiConnected, setApiConnected] = useState(false);
 
-  // Date range state
   const [selectedPreset, setSelectedPreset] = useState(DEFAULT_PRESET);
   const [customRange, setCustomRange] = useState<DateRange | null>(null);
 
-  /** Resolve the active date range (custom or from preset) */
   const getActiveDateRange = useCallback((): DateRange => {
     if (customRange) return customRange;
     const preset = getPresetByValue(selectedPreset);
@@ -143,68 +75,54 @@ export default function DashboardPage() {
     setIsLoading(true);
     const dateRange = getActiveDateRange();
     try {
-      const [metricsRes, trendsRes, campaignsRes, alertsRes] = await Promise.all([
+      const [metaRes, googleRes] = await Promise.allSettled([
         api.getMetricsOverview(dateRange),
-        api.getTrendData(365, dateRange),
-        api.getCampaigns(dateRange),
-        api.getAlerts(),
+        api.getGoogleOverview(dateRange),
       ]);
 
-      setMetrics(transformMetrics(metricsRes));
-      setTrends(trendsRes.map(transformTrend));
-      setCampaigns(campaignsRes.map(transformCampaign));
-      setAlerts(alertsRes.map(transformAlert));
-      setApiConnected(true);
+      if (metaRes.status === "fulfilled") {
+        setMeta(toPlatform(metaRes.value, true));
+      }
+      if (googleRes.status === "fulfilled" && googleRes.value.spend > 0) {
+        setGoogle(toPlatform(googleRes.value, true));
+      }
     } catch (error) {
-      console.log("API not available, using mock data:", error);
-      setApiConnected(false);
+      console.log("Overview fetch error:", error);
     } finally {
       setIsLoading(false);
     }
   }, [getActiveDateRange]);
 
-  // Fetch on mount and when date range changes
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
   const handlePresetChange = (preset: string) => {
     setSelectedPreset(preset);
-    setCustomRange(null); // clear custom when preset selected
+    setCustomRange(null);
   };
 
   const handleCustomRangeChange = (range: DateRange) => {
     setCustomRange(range);
   };
 
-  const handleRefresh = () => {
-    fetchData();
-  };
+  // Aggregate totals
+  const totalSpend = meta.spend + google.spend + microsoft.spend;
+  const totalLeads = meta.leads + google.leads + microsoft.leads;
+  const totalCpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
 
-  const handleAcknowledge = async (alertId: string) => {
-    try {
-      if (apiConnected) {
-        await api.acknowledgeAlert(alertId);
-      }
-      setAlerts((prev) =>
-        prev.map((alert) =>
-          alert.id === alertId ? { ...alert, acknowledged: true } : alert
-        )
-      );
-    } catch (error) {
-      console.error("Failed to acknowledge alert:", error);
-    }
-  };
-
-  // Dynamic chart title
-  const chartTitle = `${formatDateRangeLabel(selectedPreset, customRange)} Performance Trends`;
+  const platforms = [
+    { name: "Meta", data: meta, icon: Facebook, color: "blue", href: "/meta" },
+    { name: "Google", data: google, icon: Search, color: "green", href: "/google" },
+    { name: "Microsoft", data: microsoft, icon: Monitor, color: "gray", href: "/microsoft" },
+  ];
 
   return (
     <div className="min-h-screen bg-background">
       <Header
-        title="Dashboard"
-        subtitle={`Meta Ads Performance Overview${!apiConnected ? " (Demo Mode)" : ""}`}
-        onRefresh={handleRefresh}
+        title="Overview"
+        subtitle="Cross-Platform Performance Summary"
+        onRefresh={fetchData}
         isLoading={isLoading}
         selectedPreset={selectedPreset}
         customRange={customRange}
@@ -213,89 +131,109 @@ export default function DashboardPage() {
       />
 
       <div className="p-6 space-y-6">
-        {/* Lead Metrics Row - Highlighted */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          <MetricCard
-            title="Total Leads"
-            value={formatNumber(metrics.leads)}
-            change={metrics.leadsChange}
-            icon={<UserPlus className="h-4 w-4" />}
-            className="border-2 border-green-200 bg-green-50/50"
-          />
-          <MetricCard
-            title="Blended CPL"
-            value={formatCurrency(metrics.costPerLead)}
-            change={metrics.costPerLeadChange}
-            icon={<Users className="h-4 w-4" />}
-            className="border-2 border-green-200 bg-green-50/50"
-          />
-          <MetricCard
-            title="Remarketing CPL"
-            value={formatCurrency(metrics.remarketingCpl || 0)}
-            subtitle={`${formatNumber(metrics.remarketingLeads || 0)} leads`}
-            icon={<RefreshCw className="h-4 w-4" />}
-            className="border-2 border-blue-200 bg-blue-50/50"
-          />
-          <MetricCard
-            title="Prospecting CPL"
-            value={formatCurrency(metrics.prospectingCpl || 0)}
-            subtitle={`${formatNumber(metrics.prospectingLeads || 0)} leads`}
-            icon={<Megaphone className="h-4 w-4" />}
-            className="border-2 border-purple-200 bg-purple-50/50"
-          />
-          <MetricCard
-            title="Active Ads"
-            value={`${metrics.activeAds} / ${metrics.activeAdsThreshold || 250}`}
-            subtitle={metrics.activeAds >= (metrics.activeAdsThreshold || 250) ? "At threshold!" : `${(metrics.activeAdsThreshold || 250) - metrics.activeAds} remaining`}
-            icon={<Layers className="h-4 w-4" />}
-            className={metrics.activeAds >= (metrics.activeAdsThreshold || 250) * 0.9
-              ? "border-2 border-red-200 bg-red-50/50"
-              : "border-2 border-gray-200"}
-          />
+        {/* Aggregate Totals */}
+        <div>
+          <h2 className="text-lg font-semibold mb-3">All Platforms Combined</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <MetricCard
+              title="Total Spend"
+              value={formatCurrency(totalSpend)}
+              icon={<DollarSign className="h-4 w-4" />}
+              className="border-2 border-gray-200"
+            />
+            <MetricCard
+              title="Total Leads"
+              value={formatNumber(totalLeads)}
+              icon={<UserPlus className="h-4 w-4" />}
+              className="border-2 border-green-200 bg-green-50/50"
+            />
+            <MetricCard
+              title="Blended CPL"
+              value={formatCurrency(totalCpl)}
+              icon={<Users className="h-4 w-4" />}
+              className="border-2 border-green-200 bg-green-50/50"
+            />
+          </div>
         </div>
 
-        {/* Standard Metric Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-          <MetricCard
-            title="Total Spend"
-            value={formatCurrency(metrics.spend)}
-            change={metrics.spendChange}
-            icon={<DollarSign className="h-4 w-4" />}
-          />
-          <MetricCard
-            title="Impressions"
-            value={formatNumber(metrics.impressions)}
-            change={metrics.impressionsChange}
-            icon={<Eye className="h-4 w-4" />}
-          />
-          <MetricCard
-            title="Clicks"
-            value={formatNumber(metrics.clicks)}
-            change={metrics.clicksChange}
-            icon={<MousePointer className="h-4 w-4" />}
-          />
-          <MetricCard
-            title="CTR"
-            value={formatPercent(metrics.ctr)}
-            change={metrics.ctrChange}
-            icon={<TrendingUp className="h-4 w-4" />}
-          />
-          <MetricCard
-            title="CPC"
-            value={formatCurrency(metrics.cpc)}
-            change={metrics.cpcChange}
-            icon={<Target className="h-4 w-4" />}
-          />
+        {/* Per-Platform Breakdown */}
+        <div>
+          <h2 className="text-lg font-semibold mb-3">By Platform</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {platforms.map((p) => {
+              const colorMap: Record<string, string> = {
+                blue: "border-blue-200 bg-blue-50/30",
+                green: "border-green-200 bg-green-50/30",
+                gray: "border-gray-200 bg-gray-50/30",
+              };
+              const headerColorMap: Record<string, string> = {
+                blue: "text-blue-700",
+                green: "text-green-700",
+                gray: "text-gray-500",
+              };
+              const borderClass = colorMap[p.color] || "border-gray-200";
+              const headerClass = headerColorMap[p.color] || "text-gray-700";
+
+              return (
+                <a
+                  key={p.name}
+                  href={p.href}
+                  className={`rounded-xl border-2 p-5 transition-shadow hover:shadow-md ${borderClass}`}
+                >
+                  <div className="flex items-center gap-2 mb-4">
+                    <p.icon className={`h-5 w-5 ${headerClass}`} />
+                    <h3 className={`text-lg font-bold ${headerClass}`}>
+                      {p.name}
+                    </h3>
+                    {!p.data.connected && p.name !== "Microsoft" && (
+                      <span className="ml-auto text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-700">
+                        Not Connected
+                      </span>
+                    )}
+                    {p.name === "Microsoft" && (
+                      <span className="ml-auto text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">
+                        Coming Soon
+                      </span>
+                    )}
+                    {p.data.connected && (
+                      <span className="ml-auto text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">
+                        Live
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-sm text-muted-foreground">Spend</span>
+                      <span className="text-lg font-semibold">
+                        {formatCurrency(p.data.spend)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-sm text-muted-foreground">Leads</span>
+                      <span className="text-lg font-semibold">
+                        {formatNumber(p.data.leads)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-sm text-muted-foreground">CPL</span>
+                      <span className="text-lg font-semibold">
+                        {p.data.cpl > 0 ? formatCurrency(p.data.cpl) : "—"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {p.data.connected && (
+                    <div className="mt-4 pt-3 border-t text-xs text-muted-foreground flex items-center gap-1">
+                      <TrendingUp className="h-3 w-3" />
+                      {p.data.spendChange > 0 ? "+" : ""}{p.data.spendChange}% spend vs prior month
+                    </div>
+                  )}
+                </a>
+              );
+            })}
+          </div>
         </div>
-
-        {/* Trend Chart */}
-        <TrendChart data={trends} title={chartTitle} />
-
-        {/* Campaign Table — Full Width */}
-        <CampaignTable campaigns={campaigns} />
-
-        {/* Audit Alerts */}
-        <AlertsFeed alerts={alerts} onAcknowledge={handleAcknowledge} />
       </div>
     </div>
   );

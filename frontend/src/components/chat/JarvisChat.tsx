@@ -285,7 +285,8 @@ function formatMessage(content: string): React.ReactNode {
     if (!trimmedLine) {
       flushList();
       // Only add spacing if not consecutive empty lines
-      if (elements.length > 0 && elements[elements.length - 1]?.key !== `space-${i - 1}`) {
+      const lastEl = elements[elements.length - 1];
+      if (elements.length > 0 && (lastEl as React.ReactElement)?.key !== `space-${i - 1}`) {
         elements.push(<div key={`space-${i}`} className="h-2" />);
       }
       i++;

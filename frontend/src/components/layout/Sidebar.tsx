@@ -11,15 +11,33 @@ import {
   Settings,
   Home,
   Bot,
+  Facebook,
+  Search,
+  Monitor,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 
 const navItems = [
   {
-    label: "Dashboard",
+    label: "Overview",
     href: "/",
     icon: LayoutDashboard,
+  },
+  {
+    label: "Meta",
+    href: "/meta",
+    icon: Facebook,
+  },
+  {
+    label: "Google",
+    href: "/google",
+    icon: Search,
+  },
+  {
+    label: "Microsoft",
+    href: "/microsoft",
+    icon: Monitor,
   },
   {
     label: "JARVIS",
@@ -52,9 +70,14 @@ export function Sidebar() {
   const pathname = usePathname();
   const [apiConnected, setApiConnected] = useState(false);
 
+  const [googleConnected, setGoogleConnected] = useState(false);
+
   useEffect(() => {
     api.getStatus()
-      .then((status) => setApiConnected(status.meta_connected))
+      .then((status) => {
+        setApiConnected(status.meta_connected);
+        setGoogleConnected(status.google_connected);
+      })
       .catch(() => setApiConnected(false));
   }, []);
 
@@ -93,18 +116,21 @@ export function Sidebar() {
         </nav>
 
         {/* Footer */}
-        <div className="border-t p-4">
+        <div className="border-t p-4 space-y-2">
           <div className={cn(
             "rounded-lg p-3",
             apiConnected ? "bg-green-50 dark:bg-green-950" : "bg-muted"
           )}>
             <p className="text-xs font-medium">
-              {apiConnected ? "Live Data" : "Demo Mode"}
+              {apiConnected ? "Meta: Connected" : "Meta: Not Connected"}
             </p>
-            <p className="text-xs text-muted-foreground">
-              {apiConnected
-                ? "Connected to Meta Ads account."
-                : "Using mock data. Connect Meta Ads account to see live data."}
+          </div>
+          <div className={cn(
+            "rounded-lg p-3",
+            googleConnected ? "bg-green-50 dark:bg-green-950" : "bg-muted"
+          )}>
+            <p className="text-xs font-medium">
+              {googleConnected ? "Google: Connected" : "Google: Not Connected"}
             </p>
           </div>
         </div>
