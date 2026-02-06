@@ -14,7 +14,7 @@ interface MetricCardProps {
   value: string;
   subtitle?: string;
   change?: number;
-  changeLabel?: string;
+  changeLabel?: string; // defaults to "vs last month"
   icon?: React.ReactNode;
   className?: string;
   sparklineData?: number[];
@@ -26,7 +26,7 @@ export function MetricCard({
   value,
   subtitle,
   change,
-  changeLabel = "vs last period",
+  changeLabel = "vs last month",
   icon,
   className,
   sparklineData,

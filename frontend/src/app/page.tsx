@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Header } from "@/components/layout/Header";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { TrendChart } from "@/components/dashboard/TrendChart";
@@ -28,6 +28,12 @@ import {
   formatPercent,
 } from "@/lib/mock-data";
 import { api, MetricsOverview, DailyMetric, Campaign, AuditAlert } from "@/lib/api";
+import {
+  DateRange,
+  DEFAULT_PRESET,
+  getPresetByValue,
+  formatDateRangeLabel,
+} from "@/lib/date-range";
 
 // Transform API response to match frontend types
 function transformMetrics(apiMetrics: MetricsOverview) {
@@ -122,13 +128,25 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [apiConnected, setApiConnected] = useState(false);
 
-  const fetchData = async () => {
+  // Date range state
+  const [selectedPreset, setSelectedPreset] = useState(DEFAULT_PRESET);
+  const [customRange, setCustomRange] = useState<DateRange | null>(null);
+
+  /** Resolve the active date range (custom or from preset) */
+  const getActiveDateRange = useCallback((): DateRange => {
+    if (customRange) return customRange;
+    const preset = getPresetByValue(selectedPreset);
+    return preset ? preset.getRange() : getPresetByValue(DEFAULT_PRESET)!.getRange();
+  }, [customRange, selectedPreset]);
+
+  const fetchData = useCallback(async () => {
     setIsLoading(true);
+    const dateRange = getActiveDateRange();
     try {
       const [metricsRes, trendsRes, campaignsRes, alertsRes] = await Promise.all([
-        api.getMetricsOverview(),
-        api.getTrendData(30),
-        api.getCampaigns(),
+        api.getMetricsOverview(dateRange),
+        api.getTrendData(365, dateRange),
+        api.getCampaigns(dateRange),
         api.getAlerts(),
       ]);
 
@@ -143,11 +161,21 @@ export default function DashboardPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [getActiveDateRange]);
 
+  // Fetch on mount and when date range changes
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
+
+  const handlePresetChange = (preset: string) => {
+    setSelectedPreset(preset);
+    setCustomRange(null); // clear custom when preset selected
+  };
+
+  const handleCustomRangeChange = (range: DateRange) => {
+    setCustomRange(range);
+  };
 
   const handleRefresh = () => {
     fetchData();
@@ -168,6 +196,9 @@ export default function DashboardPage() {
     }
   };
 
+  // Dynamic chart title
+  const chartTitle = `${formatDateRangeLabel(selectedPreset, customRange)} Performance Trends`;
+
   return (
     <div className="min-h-screen bg-background">
       <Header
@@ -175,6 +206,10 @@ export default function DashboardPage() {
         subtitle={`Meta Ads Performance Overview${!apiConnected ? " (Demo Mode)" : ""}`}
         onRefresh={handleRefresh}
         isLoading={isLoading}
+        selectedPreset={selectedPreset}
+        customRange={customRange}
+        onPresetChange={handlePresetChange}
+        onCustomRangeChange={handleCustomRangeChange}
       />
 
       <div className="p-6 space-y-6">
@@ -254,7 +289,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Trend Chart */}
-        <TrendChart data={trends} title="30-Day Performance Trends" />
+        <TrendChart data={trends} title={chartTitle} />
 
         {/* Campaign Table and Alerts */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

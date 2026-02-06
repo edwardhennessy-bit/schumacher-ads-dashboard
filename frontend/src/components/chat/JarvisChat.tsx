@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Send, Bot, User, Loader2, Trash2, Sparkles } from "lucide-react";
@@ -15,6 +15,296 @@ interface Message {
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+
+// Parse inline formatting (bold, italic, code)
+function parseInlineFormatting(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let remaining = text;
+  let key = 0;
+
+  while (remaining.length > 0) {
+    // Check for bold **text**
+    const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
+    // Check for italic *text* (but not **)
+    const italicMatch = remaining.match(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/);
+    // Check for inline code `text`
+    const codeMatch = remaining.match(/`([^`]+)`/);
+    // Check for currency $X,XXX.XX
+    const currencyMatch = remaining.match(/\$[\d,]+\.?\d*/);
+
+    // Find the earliest match
+    const matches = [
+      boldMatch ? { type: "bold", match: boldMatch, index: boldMatch.index! } : null,
+      italicMatch ? { type: "italic", match: italicMatch, index: italicMatch.index! } : null,
+      codeMatch ? { type: "code", match: codeMatch, index: codeMatch.index! } : null,
+    ].filter(Boolean).sort((a, b) => a!.index - b!.index);
+
+    if (matches.length === 0) {
+      parts.push(<span key={key++}>{remaining}</span>);
+      break;
+    }
+
+    const first = matches[0]!;
+
+    // Add text before the match
+    if (first.index > 0) {
+      parts.push(<span key={key++}>{remaining.slice(0, first.index)}</span>);
+    }
+
+    // Add the formatted text
+    if (first.type === "bold") {
+      parts.push(<strong key={key++} className="font-semibold">{first.match[1]}</strong>);
+    } else if (first.type === "italic") {
+      parts.push(<em key={key++}>{first.match[1]}</em>);
+    } else if (first.type === "code") {
+      parts.push(
+        <code key={key++} className="bg-muted-foreground/10 px-1.5 py-0.5 rounded text-sm font-mono">
+          {first.match[1]}
+        </code>
+      );
+    }
+
+    remaining = remaining.slice(first.index + first.match[0].length);
+  }
+
+  return parts;
+}
+
+// Parse a markdown table
+function parseTable(lines: string[], startIndex: number): { element: React.ReactNode; endIndex: number } {
+  const tableLines: string[] = [];
+  let i = startIndex;
+
+  // Collect all table lines
+  while (i < lines.length && (lines[i].includes("|") || lines[i].match(/^[\s\-|:]+$/))) {
+    tableLines.push(lines[i]);
+    i++;
+  }
+
+  if (tableLines.length < 2) {
+    return { element: null, endIndex: startIndex };
+  }
+
+  // Parse header
+  const headerLine = tableLines[0];
+  const headers = headerLine.split("|").map(h => h.trim()).filter(Boolean);
+
+  // Skip separator line
+  const dataLines = tableLines.slice(2);
+
+  const rows = dataLines.map(line =>
+    line.split("|").map(cell => cell.trim()).filter(Boolean)
+  ).filter(row => row.length > 0);
+
+  const element = (
+    <div key={`table-${startIndex}`} className="my-4 overflow-x-auto">
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/50">
+            {headers.map((header, idx) => (
+              <th key={idx} className="px-4 py-2 text-left font-semibold">
+                {header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIdx) => (
+            <tr key={rowIdx} className="border-b border-border/50 hover:bg-muted/30">
+              {row.map((cell, cellIdx) => (
+                <td key={cellIdx} className="px-4 py-2">
+                  {parseInlineFormatting(cell)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  return { element, endIndex: i - 1 };
+}
+
+// Parse code blocks
+function parseCodeBlock(lines: string[], startIndex: number): { element: React.ReactNode; endIndex: number } {
+  const startLine = lines[startIndex];
+  const language = startLine.replace(/```/g, "").trim();
+  const codeLines: string[] = [];
+  let i = startIndex + 1;
+
+  while (i < lines.length && !lines[i].startsWith("```")) {
+    codeLines.push(lines[i]);
+    i++;
+  }
+
+  const element = (
+    <div key={`code-${startIndex}`} className="my-4">
+      {language && (
+        <div className="bg-muted/80 px-3 py-1 text-xs font-mono text-muted-foreground rounded-t-lg border border-b-0 border-border">
+          {language}
+        </div>
+      )}
+      <pre className={cn(
+        "bg-muted/50 p-4 overflow-x-auto text-sm font-mono border border-border",
+        language ? "rounded-b-lg" : "rounded-lg"
+      )}>
+        <code>{codeLines.join("\n")}</code>
+      </pre>
+    </div>
+  );
+
+  return { element, endIndex: i };
+}
+
+// Main message formatter
+function formatMessage(content: string): React.ReactNode {
+  const lines = content.split("\n");
+  const elements: React.ReactNode[] = [];
+  let i = 0;
+  let listItems: React.ReactNode[] = [];
+  let listType: "ul" | "ol" | null = null;
+
+  const flushList = () => {
+    if (listItems.length > 0) {
+      if (listType === "ul") {
+        elements.push(
+          <ul key={`list-${elements.length}`} className="my-3 ml-4 space-y-1 list-disc">
+            {listItems}
+          </ul>
+        );
+      } else {
+        elements.push(
+          <ol key={`list-${elements.length}`} className="my-3 ml-4 space-y-1 list-decimal">
+            {listItems}
+          </ol>
+        );
+      }
+      listItems = [];
+      listType = null;
+    }
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmedLine = line.trim();
+
+    // Code block
+    if (trimmedLine.startsWith("```")) {
+      flushList();
+      const { element, endIndex } = parseCodeBlock(lines, i);
+      elements.push(element);
+      i = endIndex + 1;
+      continue;
+    }
+
+    // Table (line contains | and next line is separator)
+    if (trimmedLine.includes("|") && i + 1 < lines.length && lines[i + 1].match(/^[\s\-|:]+$/)) {
+      flushList();
+      const { element, endIndex } = parseTable(lines, i);
+      if (element) {
+        elements.push(element);
+        i = endIndex + 1;
+        continue;
+      }
+    }
+
+    // Headers
+    if (trimmedLine.startsWith("### ")) {
+      flushList();
+      elements.push(
+        <h3 key={i} className="text-base font-bold mt-5 mb-2 text-foreground">
+          {parseInlineFormatting(trimmedLine.slice(4))}
+        </h3>
+      );
+      i++;
+      continue;
+    }
+    if (trimmedLine.startsWith("## ")) {
+      flushList();
+      elements.push(
+        <h2 key={i} className="text-lg font-bold mt-6 mb-3 text-foreground border-b border-border pb-2">
+          {parseInlineFormatting(trimmedLine.slice(3))}
+        </h2>
+      );
+      i++;
+      continue;
+    }
+    if (trimmedLine.startsWith("# ")) {
+      flushList();
+      elements.push(
+        <h1 key={i} className="text-xl font-bold mt-6 mb-3 text-foreground">
+          {parseInlineFormatting(trimmedLine.slice(2))}
+        </h1>
+      );
+      i++;
+      continue;
+    }
+
+    // Horizontal rule
+    if (trimmedLine.match(/^[-*_]{3,}$/)) {
+      flushList();
+      elements.push(<hr key={i} className="my-4 border-border" />);
+      i++;
+      continue;
+    }
+
+    // Unordered list item
+    if (trimmedLine.match(/^[-*•]\s+/)) {
+      if (listType !== "ul") {
+        flushList();
+        listType = "ul";
+      }
+      const itemContent = trimmedLine.replace(/^[-*•]\s+/, "");
+      listItems.push(
+        <li key={`li-${i}`} className="text-sm leading-relaxed">
+          {parseInlineFormatting(itemContent)}
+        </li>
+      );
+      i++;
+      continue;
+    }
+
+    // Ordered list item
+    if (trimmedLine.match(/^\d+\.\s+/)) {
+      if (listType !== "ol") {
+        flushList();
+        listType = "ol";
+      }
+      const itemContent = trimmedLine.replace(/^\d+\.\s+/, "");
+      listItems.push(
+        <li key={`li-${i}`} className="text-sm leading-relaxed">
+          {parseInlineFormatting(itemContent)}
+        </li>
+      );
+      i++;
+      continue;
+    }
+
+    // Empty line
+    if (!trimmedLine) {
+      flushList();
+      // Only add spacing if not consecutive empty lines
+      if (elements.length > 0 && elements[elements.length - 1]?.key !== `space-${i - 1}`) {
+        elements.push(<div key={`space-${i}`} className="h-2" />);
+      }
+      i++;
+      continue;
+    }
+
+    // Regular paragraph
+    flushList();
+    elements.push(
+      <p key={i} className="text-sm leading-relaxed mb-2">
+        {parseInlineFormatting(trimmedLine)}
+      </p>
+    );
+    i++;
+  }
+
+  flushList();
+  return <div className="space-y-1">{elements}</div>;
+}
 
 export function JarvisChat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -106,79 +396,9 @@ export function JarvisChat() {
     }
   };
 
-  const formatMessage = (content: string) => {
-    // Convert markdown-like formatting to HTML
-    return content
-      .split("\n")
-      .map((line, i) => {
-        // Headers
-        if (line.startsWith("### ")) {
-          return (
-            <h3 key={i} className="text-lg font-bold mt-4 mb-2">
-              {line.slice(4)}
-            </h3>
-          );
-        }
-        if (line.startsWith("## ")) {
-          return (
-            <h2 key={i} className="text-xl font-bold mt-4 mb-2">
-              {line.slice(3)}
-            </h2>
-          );
-        }
-        if (line.startsWith("# ")) {
-          return (
-            <h1 key={i} className="text-2xl font-bold mt-4 mb-2">
-              {line.slice(2)}
-            </h1>
-          );
-        }
-        // Bold
-        if (line.includes("**")) {
-          const parts = line.split(/\*\*(.*?)\*\*/g);
-          return (
-            <p key={i} className="mb-1">
-              {parts.map((part, j) =>
-                j % 2 === 1 ? (
-                  <strong key={j}>{part}</strong>
-                ) : (
-                  <span key={j}>{part}</span>
-                )
-              )}
-            </p>
-          );
-        }
-        // List items
-        if (line.startsWith("- ")) {
-          return (
-            <li key={i} className="ml-4 list-disc">
-              {line.slice(2)}
-            </li>
-          );
-        }
-        if (line.match(/^\d+\. /)) {
-          return (
-            <li key={i} className="ml-4 list-decimal">
-              {line.replace(/^\d+\. /, "")}
-            </li>
-          );
-        }
-        // Empty lines
-        if (!line.trim()) {
-          return <br key={i} />;
-        }
-        // Regular paragraphs
-        return (
-          <p key={i} className="mb-1">
-            {line}
-          </p>
-        );
-      });
-  };
-
   return (
     <Card className="flex flex-col h-[calc(100vh-8rem)]">
-      <CardHeader className="border-b flex-shrink-0">
+      <CardHeader className="border-b flex-shrink-0 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -214,7 +434,7 @@ export function JarvisChat() {
             <Bot className="h-16 w-16 mb-4 opacity-20" />
             <h3 className="text-lg font-medium mb-2">Welcome to JARVIS</h3>
             <p className="text-sm max-w-md">
-              I'm your AI-powered Paid Media Analyst. Ask me about campaign
+              I&apos;m your AI-powered Paid Media Analyst. Ask me about campaign
               performance, budget allocation, or optimization strategies.
             </p>
             <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
@@ -256,33 +476,33 @@ export function JarvisChat() {
               )}
             >
               {message.role === "assistant" && (
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-1">
                   <Bot className="h-4 w-4 text-primary" />
                 </div>
               )}
               <div
                 className={cn(
-                  "rounded-lg px-4 py-3 max-w-[80%]",
+                  "rounded-lg max-w-[85%]",
                   message.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted"
+                    ? "bg-primary text-primary-foreground px-4 py-3"
+                    : "bg-muted/50 border border-border px-5 py-4"
                 )}
               >
                 {message.role === "user" ? (
-                  <p>{message.content}</p>
+                  <p className="text-sm">{message.content}</p>
                 ) : (
-                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <div className="text-foreground">
                     {formatMessage(message.content)}
                   </div>
                 )}
                 {message.dataSource && (
-                  <p className="text-xs mt-2 opacity-60">
-                    Data source: {message.dataSource}
+                  <p className="text-xs mt-3 pt-2 border-t border-border/50 text-muted-foreground">
+                    📊 Data source: {message.dataSource}
                   </p>
                 )}
               </div>
               {message.role === "user" && (
-                <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
+                <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0 mt-1">
                   <User className="h-4 w-4 text-primary-foreground" />
                 </div>
               )}
@@ -294,15 +514,18 @@ export function JarvisChat() {
             <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
               <Bot className="h-4 w-4 text-primary" />
             </div>
-            <div className="bg-muted rounded-lg px-4 py-3">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <div className="bg-muted/50 border border-border rounded-lg px-5 py-4">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">Analyzing...</span>
+              </div>
             </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </CardContent>
 
-      <div className="border-t p-4 flex-shrink-0">
+      <div className="border-t p-4 flex-shrink-0 bg-background">
         <div className="flex gap-2">
           <textarea
             ref={inputRef}

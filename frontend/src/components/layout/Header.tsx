@@ -2,13 +2,20 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Calendar, Download, ChevronDown } from "lucide-react";
+import { RefreshCw, Download, ChevronDown } from "lucide-react";
+import { DateRangeSelector } from "@/components/dashboard/DateRangeSelector";
+import type { DateRange } from "@/lib/date-range";
 
 interface HeaderProps {
   title: string;
   subtitle?: string;
   onRefresh?: () => void;
   isLoading?: boolean;
+  // Date range props
+  selectedPreset: string;
+  customRange: DateRange | null;
+  onPresetChange: (preset: string) => void;
+  onCustomRangeChange: (range: DateRange) => void;
 }
 
 export function Header({
@@ -16,6 +23,10 @@ export function Header({
   subtitle,
   onRefresh,
   isLoading = false,
+  selectedPreset,
+  customRange,
+  onPresetChange,
+  onCustomRangeChange,
 }: HeaderProps) {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -23,7 +34,7 @@ export function Header({
   const handleExportActiveAds = async () => {
     setIsExporting(true);
     try {
-      const response = await fetch("http://localhost:8000/api/reports/active-ads/csv");
+      const response = await fetch("http://localhost:8001/api/reports/active-ads/csv");
       if (!response.ok) throw new Error("Export failed");
 
       const blob = await response.blob();
@@ -93,11 +104,13 @@ export function Header({
           )}
         </div>
 
-        {/* Date Range Selector (placeholder) */}
-        <Button variant="outline" size="sm" className="gap-2">
-          <Calendar className="h-4 w-4" />
-          Last 30 Days
-        </Button>
+        {/* Date Range Selector */}
+        <DateRangeSelector
+          selectedPreset={selectedPreset}
+          customRange={customRange}
+          onPresetChange={onPresetChange}
+          onCustomRangeChange={onCustomRangeChange}
+        />
 
         {/* Refresh Button */}
         {onRefresh && (

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -12,6 +13,7 @@ import {
   Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 
 const navItems = [
   {
@@ -48,6 +50,13 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [apiConnected, setApiConnected] = useState(false);
+
+  useEffect(() => {
+    api.getStatus()
+      .then((status) => setApiConnected(status.meta_connected))
+      .catch(() => setApiConnected(false));
+  }, []);
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r bg-card">
@@ -85,10 +94,17 @@ export function Sidebar() {
 
         {/* Footer */}
         <div className="border-t p-4">
-          <div className="rounded-lg bg-muted p-3">
-            <p className="text-xs font-medium">Demo Mode</p>
+          <div className={cn(
+            "rounded-lg p-3",
+            apiConnected ? "bg-green-50 dark:bg-green-950" : "bg-muted"
+          )}>
+            <p className="text-xs font-medium">
+              {apiConnected ? "Live Data" : "Demo Mode"}
+            </p>
             <p className="text-xs text-muted-foreground">
-              Using mock data. Connect Meta Ads account to see live data.
+              {apiConnected
+                ? "Connected to Meta Ads account."
+                : "Using mock data. Connect Meta Ads account to see live data."}
             </p>
           </div>
         </div>

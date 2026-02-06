@@ -5,6 +5,7 @@ This service makes HTTP requests to fetch live performance data
 with custom date ranges from Meta, Google Ads, and LinkedIn.
 """
 
+import asyncio
 import os
 import httpx
 import structlog
@@ -85,6 +86,38 @@ class DateRange:
             start_date=start.strftime("%Y-%m-%d"),
             end_date=now.strftime("%Y-%m-%d")
         )
+
+    def get_comparison_period(self) -> "DateRange":
+        """Get the comparison period of same duration, immediately before this range."""
+        start = datetime.strptime(self.start_date, "%Y-%m-%d")
+        end = datetime.strptime(self.end_date, "%Y-%m-%d")
+        duration = (end - start).days
+        comp_end = start - timedelta(days=1)
+        comp_start = comp_end - timedelta(days=duration)
+        return DateRange(
+            start_date=comp_start.strftime("%Y-%m-%d"),
+            end_date=comp_end.strftime("%Y-%m-%d")
+        )
+
+    @staticmethod
+    def get_last_month_range() -> "DateRange":
+        """Get the full previous calendar month as a DateRange."""
+        from calendar import monthrange
+        now = datetime.now()
+        first_of_this_month = now.replace(day=1)
+        last_of_prev = first_of_this_month - timedelta(days=1)
+        first_of_prev = last_of_prev.replace(day=1)
+        return DateRange(
+            start_date=first_of_prev.strftime("%Y-%m-%d"),
+            end_date=last_of_prev.strftime("%Y-%m-%d")
+        )
+
+    @property
+    def duration_days(self) -> int:
+        """Number of days in this range."""
+        start = datetime.strptime(self.start_date, "%Y-%m-%d")
+        end = datetime.strptime(self.end_date, "%Y-%m-%d")
+        return (end - start).days + 1
 
 
 def parse_date_range_from_query(query: str) -> Optional[DateRange]:
@@ -313,6 +346,76 @@ class LiveAPIService:
         except Exception as e:
             logger.error("meta_campaigns_error", error=str(e))
             return {"success": False, "error": str(e)}
+
+    async def get_meta_daily_insights(
+        self,
+        account_id: str,
+        date_range: DateRange,
+    ) -> Dict[str, Any]:
+        """Fetch daily-level insights for trend chart data."""
+        if not self.meta_token:
+            return {"success": False, "error": "Meta API token not configured"}
+
+        fields = [
+            "spend",
+            "impressions",
+            "clicks",
+            "ctr",
+            "cpc",
+            "cpm",
+            "actions",
+        ]
+
+        params = {
+            "access_token": self.meta_token,
+            "fields": ",".join(fields),
+            "time_range": f'{{"since":"{date_range.start_date}","until":"{date_range.end_date}"}}',
+            "time_increment": "1",
+            "limit": 400,
+        }
+
+        url = f"{META_API_BASE}/{account_id}/insights"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+
+                return {
+                    "success": True,
+                    "data": data.get("data", []),
+                }
+
+        except Exception as e:
+            logger.error("meta_daily_insights_error", error=str(e))
+            return {"success": False, "error": str(e)}
+
+    async def get_insights_with_comparison(
+        self,
+        account_id: str,
+        date_range: DateRange,
+    ) -> Dict[str, Any]:
+        """Fetch insights for current and comparison periods in parallel."""
+        comparison_range = date_range.get_comparison_period()
+
+        current, previous = await asyncio.gather(
+            self.get_meta_account_insights(account_id, date_range),
+            self.get_meta_account_insights(account_id, comparison_range),
+        )
+
+        return {
+            "current": current,
+            "previous": previous,
+            "date_range": {
+                "start": date_range.start_date,
+                "end": date_range.end_date,
+            },
+            "comparison_range": {
+                "start": comparison_range.start_date,
+                "end": comparison_range.end_date,
+            },
+        }
 
     def format_insights_for_context(self, insights: Dict[str, Any]) -> str:
         """
