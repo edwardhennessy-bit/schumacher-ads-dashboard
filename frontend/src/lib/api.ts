@@ -93,6 +93,8 @@ export interface AuditSummary {
 
 export interface ApiStatus {
   meta_connected: boolean;
+  google_connected: boolean;
+  microsoft_connected: boolean;
   claude_connected: boolean;
   slack_connected: boolean;
   database_url: string;
@@ -194,6 +196,25 @@ class ApiClient {
 
   async runAudit(): Promise<{ message: string; status: string }> {
     return this.fetch("/api/audits/run", { method: "POST" });
+  }
+
+  // --- Google Ads ---
+  async getGoogleOverview(dateRange?: DateRange): Promise<MetricsOverview> {
+    return this.fetch<MetricsOverview>(`/api/google/overview${this.dateParams(dateRange)}`);
+  }
+
+  async getGoogleCampaigns(dateRange?: DateRange): Promise<Campaign[]> {
+    return this.fetch<Campaign[]>(`/api/google/campaigns${this.dateParams(dateRange)}`);
+  }
+
+  async getGoogleTrends(days: number = 30, dateRange?: DateRange): Promise<DailyMetric[]> {
+    return this.fetch<DailyMetric[]>(
+      `/api/google/trends${this.dateParams(dateRange, { days: String(days) })}`
+    );
+  }
+
+  async getGoogleStatus(): Promise<{ configured: boolean; customer_id: string }> {
+    return this.fetch("/api/google/status");
   }
 }
 

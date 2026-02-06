@@ -12,6 +12,7 @@ import structlog
 from app.config import get_settings
 from app.routers import metrics_router, campaigns_router, audits_router, reports_router, chat_router
 from app.routers.gateway import router as gateway_router
+from app.routers.google_metrics import router as google_metrics_router
 
 settings = get_settings()
 
@@ -120,6 +121,7 @@ app.include_router(campaigns_router)
 app.include_router(audits_router)
 app.include_router(reports_router)
 app.include_router(gateway_router)
+app.include_router(google_metrics_router)
 app.include_router(chat_router)
 
 
@@ -147,6 +149,8 @@ async def api_status():
     """Get API status and configuration info."""
     return {
         "meta_connected": bool(settings.meta_ad_account_id),
+        "google_connected": bool(settings.google_ads_developer_token),
+        "microsoft_connected": False,  # placeholder for future
         "claude_connected": bool(settings.anthropic_api_key),
         "slack_webhook_connected": bool(settings.slack_webhook_url),
         "jarvis_bot_configured": settings.is_slack_bot_configured(),

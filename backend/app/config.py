@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     meta_ad_account_id: str = ""
     meta_access_token: str = Field(default="", description="Meta Graph API Access Token")
 
+    # Google Ads
+    google_ads_developer_token: str = Field(default="", description="Google Ads API Developer Token")
+    google_ads_client_id: str = Field(default="", description="Google OAuth2 Client ID")
+    google_ads_client_secret: str = Field(default="", description="Google OAuth2 Client Secret")
+    google_ads_refresh_token: str = Field(default="", description="Google OAuth2 Refresh Token")
+    google_ads_customer_id: str = Field(default="3428920141", description="Google Ads Customer ID")
+    google_ads_manager_id: str = Field(default="5405350977", description="Google Ads MCC Manager ID")
+
     # Claude API
     anthropic_api_key: str = ""
 
