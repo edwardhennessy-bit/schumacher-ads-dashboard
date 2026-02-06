@@ -9,7 +9,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DailyMetric, formatCurrency, formatNumber } from "@/lib/mock-data";
@@ -28,15 +27,14 @@ interface MetricConfig {
   color: string;
   yAxisId: "left" | "right";
   strokeWidth: number;
-  formatter?: (value: number) => string;
 }
 
 const METRICS: MetricConfig[] = [
-  { key: "spend", label: "Spend", color: "hsl(var(--chart-1))", yAxisId: "left", strokeWidth: 2 },
+  { key: "spend", label: "Spend", color: "#1f2937", yAxisId: "left", strokeWidth: 2 },
   { key: "leads", label: "Leads", color: "#22c55e", yAxisId: "right", strokeWidth: 3 },
   { key: "costPerLead", label: "CPL", color: "#f59e0b", yAxisId: "left", strokeWidth: 2 },
-  { key: "clicks", label: "Clicks", color: "hsl(var(--chart-2))", yAxisId: "right", strokeWidth: 2 },
-  { key: "conversions", label: "Conversions", color: "hsl(var(--chart-3))", yAxisId: "right", strokeWidth: 2 },
+  { key: "clicks", label: "Clicks", color: "#6366f1", yAxisId: "right", strokeWidth: 2 },
+  { key: "conversions", label: "Conversions", color: "#ec4899", yAxisId: "right", strokeWidth: 2 },
 ];
 
 export function TrendChart({ data, title = "Performance Trends" }: TrendChartProps) {
@@ -77,6 +75,9 @@ export function TrendChart({ data, title = "Performance Trends" }: TrendChartPro
   const showLeftAxis = visibleMetrics.has("spend") || visibleMetrics.has("costPerLead");
   const showRightAxis = visibleMetrics.has("leads") || visibleMetrics.has("clicks") || visibleMetrics.has("conversions");
 
+  // Show dots when few data points for better readability
+  const showDots = data.length <= 14;
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -84,23 +85,26 @@ export function TrendChart({ data, title = "Performance Trends" }: TrendChartPro
           <CardTitle className="text-lg">{title}</CardTitle>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted-foreground mr-1">Metrics:</span>
-            {METRICS.map((metric) => (
-              <button
-                key={metric.key}
-                onClick={() => toggleMetric(metric.key)}
-                className={cn(
-                  "px-3 py-1.5 text-xs font-medium rounded-full border transition-all",
-                  visibleMetrics.has(metric.key)
-                    ? "border-transparent text-white"
-                    : "border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
-                )}
-                style={{
-                  backgroundColor: visibleMetrics.has(metric.key) ? metric.color : undefined,
-                }}
-              >
-                {metric.label}
-              </button>
-            ))}
+            {METRICS.map((metric) => {
+              const isActive = visibleMetrics.has(metric.key);
+              return (
+                <button
+                  key={metric.key}
+                  onClick={() => toggleMetric(metric.key)}
+                  className={cn(
+                    "px-3 py-1.5 text-xs font-medium rounded-full border transition-all",
+                    isActive
+                      ? "border-transparent text-white shadow-sm"
+                      : "border-gray-300 text-gray-600 hover:bg-gray-100"
+                  )}
+                  style={{
+                    backgroundColor: isActive ? metric.color : "white",
+                  }}
+                >
+                  {metric.label}
+                </button>
+              );
+            })}
             <div className="flex gap-1 ml-2 border-l pl-2">
               <button
                 onClick={selectAll}
@@ -171,22 +175,24 @@ export function TrendChart({ data, title = "Performance Trends" }: TrendChartPro
                 }}
                 labelFormatter={(label) => `Date: ${label}`}
               />
-              <Legend />
-              {METRICS.map((metric) =>
-                visibleMetrics.has(metric.key) ? (
+              {METRICS.map((metric) => {
+                const isVisible = visibleMetrics.has(metric.key);
+                return (
                   <Line
                     key={metric.key}
                     yAxisId={metric.yAxisId}
                     type="monotone"
                     dataKey={metric.key}
                     name={metric.label}
-                    stroke={metric.color}
-                    strokeWidth={metric.strokeWidth}
-                    dot={data.length <= 14 ? { r: 3, fill: metric.color } : false}
-                    activeDot={{ r: metric.key === "leads" ? 6 : 5 }}
+                    stroke={isVisible ? metric.color : "transparent"}
+                    strokeWidth={isVisible ? metric.strokeWidth : 0}
+                    dot={isVisible && showDots ? { r: 3, fill: metric.color, stroke: metric.color } : false}
+                    activeDot={isVisible ? { r: metric.key === "leads" ? 6 : 5 } : false}
+                    hide={!isVisible}
+                    legendType="none"
                   />
-                ) : null
-              )}
+                );
+              })}
             </LineChart>
           </ResponsiveContainer>
         </div>
