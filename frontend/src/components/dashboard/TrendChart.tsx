@@ -20,7 +20,7 @@ interface TrendChartProps {
   title?: string;
 }
 
-type MetricKey = "spend" | "leads" | "clicks" | "conversions";
+type MetricKey = "spend" | "leads" | "clicks" | "conversions" | "costPerLead";
 
 interface MetricConfig {
   key: MetricKey;
@@ -28,18 +28,20 @@ interface MetricConfig {
   color: string;
   yAxisId: "left" | "right";
   strokeWidth: number;
+  formatter?: (value: number) => string;
 }
 
 const METRICS: MetricConfig[] = [
   { key: "spend", label: "Spend", color: "hsl(var(--chart-1))", yAxisId: "left", strokeWidth: 2 },
   { key: "leads", label: "Leads", color: "#22c55e", yAxisId: "right", strokeWidth: 3 },
+  { key: "costPerLead", label: "CPL", color: "#f59e0b", yAxisId: "left", strokeWidth: 2 },
   { key: "clicks", label: "Clicks", color: "hsl(var(--chart-2))", yAxisId: "right", strokeWidth: 2 },
   { key: "conversions", label: "Conversions", color: "hsl(var(--chart-3))", yAxisId: "right", strokeWidth: 2 },
 ];
 
 export function TrendChart({ data, title = "Performance Trends" }: TrendChartProps) {
   const [visibleMetrics, setVisibleMetrics] = useState<Set<MetricKey>>(
-    new Set(["spend", "leads", "clicks", "conversions"])
+    new Set(["spend", "leads"])
   );
 
   const toggleMetric = (metric: MetricKey) => {
@@ -55,24 +57,24 @@ export function TrendChart({ data, title = "Performance Trends" }: TrendChartPro
   };
 
   const selectAll = () => {
-    setVisibleMetrics(new Set(["spend", "leads", "clicks", "conversions"]));
+    setVisibleMetrics(new Set(["spend", "leads", "costPerLead", "clicks", "conversions"]));
   };
 
   const clearAll = () => {
     setVisibleMetrics(new Set());
   };
 
-  // Format date for display
+  // Format date for display — append T00:00:00 to avoid timezone shift
   const formattedData = data.map((item) => ({
     ...item,
-    displayDate: new Date(item.date).toLocaleDateString("en-US", {
+    displayDate: new Date(item.date + "T00:00:00").toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
     }),
   }));
 
-  // Check if we need the left Y-axis (spend) or right Y-axis (other metrics)
-  const showLeftAxis = visibleMetrics.has("spend");
+  // Check if we need the left Y-axis (spend/CPL) or right Y-axis (count metrics)
+  const showLeftAxis = visibleMetrics.has("spend") || visibleMetrics.has("costPerLead");
   const showRightAxis = visibleMetrics.has("leads") || visibleMetrics.has("clicks") || visibleMetrics.has("conversions");
 
   return (
@@ -161,6 +163,7 @@ export function TrendChart({ data, title = "Performance Trends" }: TrendChartPro
                 formatter={(value, name) => {
                   const numValue = typeof value === "number" ? value : 0;
                   if (name === "Spend") return [formatCurrency(numValue), "Spend"];
+                  if (name === "CPL") return [formatCurrency(numValue), "CPL"];
                   if (name === "Clicks") return [formatNumber(numValue), "Clicks"];
                   if (name === "Leads") return [numValue, "Leads"];
                   if (name === "Conversions") return [numValue, "Conversions"];
@@ -179,8 +182,8 @@ export function TrendChart({ data, title = "Performance Trends" }: TrendChartPro
                     name={metric.label}
                     stroke={metric.color}
                     strokeWidth={metric.strokeWidth}
-                    dot={false}
-                    activeDot={{ r: metric.key === "leads" ? 5 : 4 }}
+                    dot={data.length <= 14 ? { r: 3, fill: metric.color } : false}
+                    activeDot={{ r: metric.key === "leads" ? 6 : 5 }}
                   />
                 ) : null
               )}
