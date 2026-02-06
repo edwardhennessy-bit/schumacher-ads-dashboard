@@ -380,6 +380,61 @@ class LiveAPIService:
             logger.error("meta_campaigns_error", error=str(e))
             return {"success": False, "error": str(e)}
 
+    async def get_meta_active_ads_count(
+        self,
+        account_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Count truly active ads — ads with effective_status=ACTIVE.
+
+        Meta's effective_status=ACTIVE means the ad itself is active AND its
+        parent ad set is active AND its parent campaign is active.
+        """
+        if not self.meta_token:
+            return {"success": False, "error": "Meta API token not configured"}
+
+        import json as _json
+
+        params = {
+            "access_token": self.meta_token,
+            "fields": "id",
+            "filtering": _json.dumps([{
+                "field": "effective_status",
+                "operator": "IN",
+                "value": ["ACTIVE"],
+            }]),
+            "limit": 500,
+        }
+
+        url = f"{META_API_BASE}/{account_id}/ads"
+
+        try:
+            active_count = 0
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                while url:
+                    response = await client.get(url, params=params)
+                    response.raise_for_status()
+                    data = response.json()
+                    active_count += len(data.get("data", []))
+
+                    # Handle pagination
+                    next_url = data.get("paging", {}).get("next")
+                    if next_url:
+                        url = next_url
+                        params = {}  # next URL already contains all params
+                    else:
+                        url = None
+
+            logger.info("meta_active_ads_count", account_id=account_id, count=active_count)
+            return {
+                "success": True,
+                "active_ads": active_count,
+            }
+
+        except Exception as e:
+            logger.error("meta_active_ads_error", error=str(e))
+            return {"success": False, "error": str(e)}
+
     async def get_meta_daily_insights(
         self,
         account_id: str,

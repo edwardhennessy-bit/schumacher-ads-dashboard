@@ -86,7 +86,7 @@ def _segment_campaign_cpls(campaigns: list) -> dict:
     }
 
 
-def _build_overview_from_live(current_data: dict, previous_data: dict = None, campaign_data: list = None) -> MetricsOverview:
+def _build_overview_from_live(current_data: dict, previous_data: dict = None, campaign_data: list = None, live_active_ads: int = None) -> MetricsOverview:
     """Transform raw Meta API response into MetricsOverview schema."""
     spend = float(current_data.get("spend", 0))
     impressions = int(current_data.get("impressions", 0))
@@ -138,16 +138,14 @@ def _build_overview_from_live(current_data: dict, previous_data: dict = None, ca
     # Segment campaign data for remarketing/prospecting CPLs
     segmented = _segment_campaign_cpls(campaign_data or [])
 
-    # Ad inventory comes from cached data (always current snapshot)
-    ad_inventory = meta_service._load_json("ad_inventory.json")
-    if ad_inventory:
-        active_ads = ad_inventory.get("active_ads", 0)
-        total_ads = ad_inventory.get("total_ads", 0)
-        active_ads_threshold = ad_inventory.get("threshold", 250)
+    # Ad inventory: use live count if available, otherwise fall back to cached data
+    if live_active_ads is not None:
+        active_ads = live_active_ads
     else:
-        active_ads = 204
-        total_ads = 2500
-        active_ads_threshold = 250
+        ad_inventory = meta_service._load_json("ad_inventory.json")
+        active_ads = ad_inventory.get("active_ads", 0) if ad_inventory else 0
+    total_ads = 0  # Not displayed in UI
+    active_ads_threshold = 250
 
     return MetricsOverview(
         spend=spend,
@@ -200,17 +198,19 @@ async def get_metrics_overview(
                 prior_month_range = date_range.get_prior_month_equivalent()
 
                 import asyncio
-                current_result, prior_month_result, campaign_result = await asyncio.gather(
+                current_result, prior_month_result, campaign_result, active_ads_result = await asyncio.gather(
                     live_service.get_meta_account_insights(account_id, date_range),
                     live_service.get_meta_account_insights(account_id, prior_month_range),
                     live_service.get_meta_campaigns(account_id, date_range),
+                    live_service.get_meta_active_ads_count(account_id),
                 )
 
                 if current_result.get("success") and current_result.get("data"):
                     current_data = current_result["data"][0]
                     previous_data = prior_month_result["data"][0] if prior_month_result.get("success") and prior_month_result.get("data") else None
                     campaign_data = campaign_result.get("campaigns", []) if campaign_result.get("success") else []
-                    return _build_overview_from_live(current_data, previous_data, campaign_data)
+                    live_active_ads = active_ads_result.get("active_ads") if active_ads_result.get("success") else None
+                    return _build_overview_from_live(current_data, previous_data, campaign_data, live_active_ads)
 
                 logger.warning("live_overview_no_data", date_range=f"{start_date} to {end_date}")
             except Exception as e:
