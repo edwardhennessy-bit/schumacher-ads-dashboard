@@ -196,19 +196,19 @@ async def get_metrics_overview(
                 date_range = DateRange(start_date=start_date, end_date=end_date)
                 account_id = settings.meta_ad_account_id or "act_142003632"
 
-                # Always compare against last calendar month
-                last_month_range = DateRange.get_last_month_range()
+                # Compare against same date range shifted back one month (apples-to-apples)
+                prior_month_range = date_range.get_prior_month_equivalent()
 
                 import asyncio
-                current_result, last_month_result, campaign_result = await asyncio.gather(
+                current_result, prior_month_result, campaign_result = await asyncio.gather(
                     live_service.get_meta_account_insights(account_id, date_range),
-                    live_service.get_meta_account_insights(account_id, last_month_range),
+                    live_service.get_meta_account_insights(account_id, prior_month_range),
                     live_service.get_meta_campaigns(account_id, date_range),
                 )
 
                 if current_result.get("success") and current_result.get("data"):
                     current_data = current_result["data"][0]
-                    previous_data = last_month_result["data"][0] if last_month_result.get("success") and last_month_result.get("data") else None
+                    previous_data = prior_month_result["data"][0] if prior_month_result.get("success") and prior_month_result.get("data") else None
                     campaign_data = campaign_result.get("campaigns", []) if campaign_result.get("success") else []
                     return _build_overview_from_live(current_data, previous_data, campaign_data)
 

@@ -99,6 +99,39 @@ class DateRange:
             end_date=comp_end.strftime("%Y-%m-%d")
         )
 
+    def get_prior_month_equivalent(self) -> "DateRange":
+        """Shift this date range back by one calendar month for apples-to-apples comparison.
+
+        Examples:
+          Feb 1-5   → Jan 1-5
+          Jan 15-31 → Dec 15-31
+          Mar 1-31  → Feb 1-28 (clamped to month length)
+        """
+        from calendar import monthrange
+
+        start = datetime.strptime(self.start_date, "%Y-%m-%d")
+        end = datetime.strptime(self.end_date, "%Y-%m-%d")
+
+        # Shift start back one month
+        if start.month == 1:
+            prev_start = start.replace(year=start.year - 1, month=12)
+        else:
+            # Clamp day to max days in prior month
+            _, max_day = monthrange(start.year, start.month - 1)
+            prev_start = start.replace(month=start.month - 1, day=min(start.day, max_day))
+
+        # Shift end back one month
+        if end.month == 1:
+            prev_end = end.replace(year=end.year - 1, month=12)
+        else:
+            _, max_day = monthrange(end.year, end.month - 1)
+            prev_end = end.replace(month=end.month - 1, day=min(end.day, max_day))
+
+        return DateRange(
+            start_date=prev_start.strftime("%Y-%m-%d"),
+            end_date=prev_end.strftime("%Y-%m-%d")
+        )
+
     @staticmethod
     def get_last_month_range() -> "DateRange":
         """Get the full previous calendar month as a DateRange."""

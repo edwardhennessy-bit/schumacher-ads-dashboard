@@ -26,7 +26,7 @@ export function MetricCard({
   value,
   subtitle,
   change,
-  changeLabel = "vs last month",
+  changeLabel = "vs prior month",
   icon,
   className,
   sparklineData,
