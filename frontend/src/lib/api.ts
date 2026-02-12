@@ -23,6 +23,11 @@ export interface MetricsOverview {
   cost_per_lead_change: number;
   lead_rate: number;
   lead_rate_change: number;
+  // Opportunity metrics
+  opportunities: number;
+  opportunities_change: number;
+  cost_per_opportunity: number;
+  cost_per_opportunity_change: number;
   // Segmented CPL metrics
   remarketing_leads: number;
   remarketing_spend: number;
@@ -65,6 +70,9 @@ export interface Campaign {
   leads: number;
   cost_per_lead: number;
   lead_rate: number;
+  // Opportunity metrics
+  opportunities: number;
+  cost_per_opportunity: number;
 }
 
 export interface AuditAlert {
@@ -112,6 +120,7 @@ class ApiClient {
   private async fetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       ...options,
+      cache: "no-store",
       headers: {
         "Content-Type": "application/json",
         ...options?.headers,

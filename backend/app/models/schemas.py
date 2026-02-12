@@ -25,6 +25,11 @@ class MetricsOverview(BaseModel):
     cost_per_lead_change: float = 0
     lead_rate: float = 0  # leads / clicks as percentage
     lead_rate_change: float = 0
+    # Opportunity metrics (HubSpot - Opportunity)
+    opportunities: int = 0
+    opportunities_change: float = 0
+    cost_per_opportunity: float = 0
+    cost_per_opportunity_change: float = 0
     # Segmented CPL metrics
     remarketing_leads: int = 0
     remarketing_spend: float = 0
@@ -45,10 +50,12 @@ class DailyMetric(BaseModel):
     clicks: int
     conversions: int
     leads: int
+    opportunities: int = 0
     ctr: Optional[float] = None
     cpc: Optional[float] = None
     cpm: Optional[float] = None
     cost_per_lead: Optional[float] = None
+    cost_per_opportunity: Optional[float] = None
 
 
 class Campaign(BaseModel):
@@ -67,6 +74,9 @@ class Campaign(BaseModel):
     leads: int
     cost_per_lead: float
     lead_rate: float  # leads / clicks as percentage
+    # Opportunity metrics
+    opportunities: int = 0
+    cost_per_opportunity: float = 0
 
 
 class AdSet(BaseModel):

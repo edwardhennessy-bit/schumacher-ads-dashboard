@@ -88,9 +88,11 @@ async def get_google_overview(
         impressions = cur.get("impressions", 0)
         clicks = cur.get("clicks", 0)
         leads = cur.get("leads", 0)
+        opportunities = cur.get("opportunities", 0)
         ctr = cur.get("ctr", 0)
         cpc = cur.get("cpc", 0)
         cpl = cur.get("cost_per_lead", 0)
+        cpo = cur.get("cost_per_opportunity", 0)
 
         return MetricsOverview(
             spend=spend,
@@ -107,6 +109,10 @@ async def get_google_overview(
             leads_change=_calc_change(leads, prev.get("leads", 0)),
             cost_per_lead=cpl,
             cost_per_lead_change=_calc_change(cpl, prev.get("cost_per_lead", 0)),
+            opportunities=opportunities,
+            opportunities_change=_calc_change(opportunities, prev.get("opportunities", 0)),
+            cost_per_opportunity=cpo,
+            cost_per_opportunity_change=_calc_change(cpo, prev.get("cost_per_opportunity", 0)),
         )
 
     except Exception as e:

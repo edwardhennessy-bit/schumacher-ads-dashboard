@@ -226,6 +226,7 @@ export default function DashboardPage() {
             title="Blended CPL"
             value={formatCurrency(metrics.costPerLead)}
             change={metrics.costPerLeadChange}
+            invertTrend
             icon={<Users className="h-4 w-4" />}
             className="border-2 border-green-200 bg-green-50/50"
           />
@@ -284,6 +285,7 @@ export default function DashboardPage() {
             title="CPC"
             value={formatCurrency(metrics.cpc)}
             change={metrics.cpcChange}
+            invertTrend
             icon={<Target className="h-4 w-4" />}
           />
         </div>

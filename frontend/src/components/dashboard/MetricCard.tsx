@@ -15,6 +15,7 @@ interface MetricCardProps {
   subtitle?: string;
   change?: number;
   changeLabel?: string; // defaults to "vs last month"
+  invertTrend?: boolean; // true for cost metrics where down = good (CPL, CPC, CPM, CPA)
   icon?: React.ReactNode;
   className?: string;
   sparklineData?: number[];
@@ -27,14 +28,19 @@ export function MetricCard({
   subtitle,
   change,
   changeLabel = "vs prior month",
+  invertTrend = false,
   icon,
   className,
   sparklineData,
   sparklineColor = "#22c55e",
 }: MetricCardProps) {
-  const isPositive = change !== undefined && change > 0;
-  const isNegative = change !== undefined && change < 0;
+  const isUp = change !== undefined && change > 0;
+  const isDown = change !== undefined && change < 0;
   const isNeutral = change === undefined || change === 0;
+
+  // For cost metrics (invertTrend), down is good (green) and up is bad (red)
+  const isGood = invertTrend ? isDown : isUp;
+  const isBad = invertTrend ? isUp : isDown;
 
   // Convert sparkline data to chart format
   const chartData = sparklineData?.map((value, index) => ({ value, index }));
@@ -54,11 +60,11 @@ export function MetricCard({
         )}
         {change !== undefined && (
           <div className="flex items-center gap-1 mt-1">
-            {isPositive && (
-              <TrendingUp className="h-3 w-3 text-green-600" />
+            {isUp && (
+              <TrendingUp className={cn("h-3 w-3", isGood ? "text-green-600" : "text-red-600")} />
             )}
-            {isNegative && (
-              <TrendingDown className="h-3 w-3 text-red-600" />
+            {isDown && (
+              <TrendingDown className={cn("h-3 w-3", isBad ? "text-red-600" : "text-green-600")} />
             )}
             {isNeutral && (
               <Minus className="h-3 w-3 text-muted-foreground" />
@@ -66,12 +72,12 @@ export function MetricCard({
             <span
               className={cn(
                 "text-xs",
-                isPositive && "text-green-600",
-                isNegative && "text-red-600",
+                isGood && "text-green-600",
+                isBad && "text-red-600",
                 isNeutral && "text-muted-foreground"
               )}
             >
-              {isPositive ? "+" : ""}
+              {isUp ? "+" : ""}
               {change.toFixed(1)}% {changeLabel}
             </span>
           </div>

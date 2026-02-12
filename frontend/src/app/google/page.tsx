@@ -44,6 +44,10 @@ function transformMetrics(apiMetrics: MetricsOverview) {
     leadsChange: apiMetrics.leads_change,
     costPerLead: apiMetrics.cost_per_lead,
     costPerLeadChange: apiMetrics.cost_per_lead_change,
+    opportunities: apiMetrics.opportunities,
+    opportunitiesChange: apiMetrics.opportunities_change,
+    costPerOpportunity: apiMetrics.cost_per_opportunity,
+    costPerOpportunityChange: apiMetrics.cost_per_opportunity_change,
     conversions: apiMetrics.conversions,
     conversionsChange: apiMetrics.conversions_change,
   };
@@ -95,6 +99,10 @@ const emptyMetrics = {
   leadsChange: 0,
   costPerLead: 0,
   costPerLeadChange: 0,
+  opportunities: 0,
+  opportunitiesChange: 0,
+  costPerOpportunity: 0,
+  costPerOpportunityChange: 0,
   conversions: 0,
   conversionsChange: 0,
 };
@@ -180,21 +188,37 @@ export default function GoogleDashboardPage() {
           </div>
         )}
 
-        {/* Lead Metrics Row */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Lead & Opportunity Metrics Row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <MetricCard
-            title="Total Leads"
+            title="MQLs (Leads)"
             value={formatNumber(metrics.leads)}
             change={metrics.leadsChange}
             icon={<UserPlus className="h-4 w-4" />}
             className="border-2 border-green-200 bg-green-50/50"
           />
           <MetricCard
-            title="Blended CPL"
+            title="Cost / Lead"
             value={formatCurrency(metrics.costPerLead)}
             change={metrics.costPerLeadChange}
+            invertTrend
             icon={<Users className="h-4 w-4" />}
             className="border-2 border-green-200 bg-green-50/50"
+          />
+          <MetricCard
+            title="Opportunities"
+            value={formatNumber(metrics.opportunities)}
+            change={metrics.opportunitiesChange}
+            icon={<Target className="h-4 w-4" />}
+            className="border-2 border-purple-200 bg-purple-50/50"
+          />
+          <MetricCard
+            title="Cost / Opportunity"
+            value={formatCurrency(metrics.costPerOpportunity)}
+            change={metrics.costPerOpportunityChange}
+            invertTrend
+            icon={<Users className="h-4 w-4" />}
+            className="border-2 border-purple-200 bg-purple-50/50"
           />
           <MetricCard
             title="Total Spend"
@@ -202,13 +226,6 @@ export default function GoogleDashboardPage() {
             change={metrics.spendChange}
             icon={<DollarSign className="h-4 w-4" />}
             className="border-2 border-blue-200 bg-blue-50/50"
-          />
-          <MetricCard
-            title="Conversions"
-            value={formatNumber(metrics.conversions)}
-            change={metrics.conversionsChange}
-            icon={<Target className="h-4 w-4" />}
-            className="border-2 border-purple-200 bg-purple-50/50"
           />
         </div>
 
@@ -236,6 +253,7 @@ export default function GoogleDashboardPage() {
             title="CPC"
             value={formatCurrency(metrics.cpc)}
             change={metrics.cpcChange}
+            invertTrend
             icon={<Target className="h-4 w-4" />}
           />
         </div>
