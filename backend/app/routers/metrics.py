@@ -283,3 +283,43 @@ async def get_ad_inventory():
         "total": overview.total_ads,
         "paused": overview.total_ads - overview.active_ads,
     }
+
+
+@router.get("/active-ads-performance")
+async def get_active_ads_performance():
+    """
+    Return all active ads with 30-day performance metrics and days-running context.
+    Used by Jarvis to generate data-driven pause recommendations.
+    """
+    settings = get_settings()
+    if not settings.meta_access_token:
+        return {"success": False, "error": "Meta API token not configured", "ads": []}
+
+    try:
+        live_service = LiveAPIService(meta_access_token=settings.meta_access_token)
+        account_id = settings.meta_ad_account_id or "act_142003632"
+        result = await live_service.get_meta_active_ads_with_performance(account_id)
+        return result
+    except Exception as e:
+        logger.error("active_ads_performance_error", error=str(e))
+        return {"success": False, "error": str(e), "ads": []}
+
+
+@router.get("/active-ads-tree")
+async def get_active_ads_tree():
+    """
+    Return the full hierarchy of active campaigns → active ad sets → active ads.
+    Each level uses effective_status=ACTIVE so only truly active objects appear.
+    """
+    settings = get_settings()
+    if not settings.meta_access_token:
+        return {"success": False, "error": "Meta API token not configured", "campaigns": []}
+
+    try:
+        live_service = LiveAPIService(meta_access_token=settings.meta_access_token)
+        account_id = settings.meta_ad_account_id or "act_142003632"
+        result = await live_service.get_meta_active_ads_tree(account_id)
+        return result
+    except Exception as e:
+        logger.error("active_ads_tree_error", error=str(e))
+        return {"success": False, "error": str(e), "campaigns": []}

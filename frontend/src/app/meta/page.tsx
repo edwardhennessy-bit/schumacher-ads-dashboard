@@ -6,6 +6,7 @@ import { MetricCard } from "@/components/dashboard/MetricCard";
 import { TrendChart } from "@/components/dashboard/TrendChart";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
 import { AlertsFeed } from "@/components/dashboard/AlertsFeed";
+import { ActiveAdsTree } from "@/components/dashboard/ActiveAdsTree";
 import {
   DollarSign,
   MousePointer,
@@ -27,7 +28,7 @@ import {
   formatNumber,
   formatPercent,
 } from "@/lib/mock-data";
-import { api, MetricsOverview, DailyMetric, Campaign, AuditAlert } from "@/lib/api";
+import { api, MetricsOverview, DailyMetric, Campaign, AuditAlert, ActiveCampaign } from "@/lib/api";
 import {
   DateRange,
   DEFAULT_PRESET,
@@ -127,6 +128,8 @@ export default function DashboardPage() {
   const [alerts, setAlerts] = useState(mockAuditAlerts);
   const [isLoading, setIsLoading] = useState(false);
   const [apiConnected, setApiConnected] = useState(false);
+  const [activeAdsTree, setActiveAdsTree] = useState<ActiveCampaign[]>([]);
+  const [activeAdsTreeLoading, setActiveAdsTreeLoading] = useState(false);
 
   // Date range state
   const [selectedPreset, setSelectedPreset] = useState(DEFAULT_PRESET);
@@ -179,6 +182,20 @@ export default function DashboardPage() {
 
   const handleRefresh = () => {
     fetchData();
+  };
+
+  const handleActiveAdsTreeOpen = async () => {
+    setActiveAdsTreeLoading(true);
+    try {
+      const result = await api.getActiveAdsTree();
+      if (result.success) {
+        setActiveAdsTree(result.campaigns);
+      }
+    } catch (error) {
+      console.error("Failed to load active ads tree:", error);
+    } finally {
+      setActiveAdsTreeLoading(false);
+    }
   };
 
   const handleAcknowledge = async (alertId: string) => {
@@ -289,6 +306,15 @@ export default function DashboardPage() {
             icon={<Target className="h-4 w-4" />}
           />
         </div>
+
+        {/* Active Ads Drill-Down */}
+        <ActiveAdsTree
+          totalActiveAds={metrics.activeAds}
+          threshold={metrics.activeAdsThreshold || 250}
+          campaigns={activeAdsTree}
+          isLoading={activeAdsTreeLoading}
+          onOpen={handleActiveAdsTreeOpen}
+        />
 
         {/* Trend Chart */}
         <TrendChart data={trends} title={chartTitle} />

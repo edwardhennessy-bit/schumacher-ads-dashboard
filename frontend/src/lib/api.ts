@@ -75,6 +75,36 @@ export interface Campaign {
   cost_per_opportunity: number;
 }
 
+export interface ActiveAd {
+  id: string;
+  name: string;
+  status: string;
+}
+
+export interface ActiveAdSet {
+  id: string;
+  name: string;
+  status: string;
+  ad_count: number;
+  ads: ActiveAd[];
+}
+
+export interface ActiveCampaign {
+  id: string;
+  name: string;
+  status: string;
+  adset_count: number;
+  ad_count: number;
+  adsets: ActiveAdSet[];
+}
+
+export interface ActiveAdsTree {
+  success: boolean;
+  total_active_ads: number;
+  campaigns: ActiveCampaign[];
+  error?: string;
+}
+
 export interface AuditAlert {
   id: string;
   type: "URL_ERROR" | "CONTENT_MISMATCH" | "HIGH_SPEND_LOW_CONV" | "SPEND_ANOMALY" | "HIGH_CPC";
@@ -170,6 +200,10 @@ class ApiClient {
     return this.fetch("/api/metrics/inventory");
   }
 
+  async getActiveAdsTree(): Promise<ActiveAdsTree> {
+    return this.fetch<ActiveAdsTree>("/api/metrics/active-ads-tree");
+  }
+
   // Campaigns
   async getCampaigns(dateRange?: DateRange): Promise<Campaign[]> {
     return this.fetch<Campaign[]>(`/api/campaigns${this.dateParams(dateRange)}`);
@@ -224,6 +258,48 @@ class ApiClient {
 
   async getGoogleStatus(): Promise<{ configured: boolean; customer_id: string }> {
     return this.fetch("/api/google/status");
+  }
+
+  // --- Reporting ---
+  async getGoogleAuthStatus(): Promise<{ configured: boolean; connected: boolean }> {
+    return this.fetch("/api/auth/google/status");
+  }
+
+  async startGoogleAuth(): Promise<{ auth_url?: string; error?: string }> {
+    return this.fetch("/api/auth/google/start");
+  }
+
+  async generateMonthlyReview(month?: number, year?: number): Promise<{
+    id: string; url: string; title: string; report_type: string; created_at: string;
+  }> {
+    return this.fetch("/api/reports/monthly-review", {
+      method: "POST",
+      body: JSON.stringify({ month, year }),
+    });
+  }
+
+  async generateWeeklyAgenda(weekOf?: string): Promise<{
+    id: string; url: string; title: string; report_type: string; created_at: string;
+  }> {
+    return this.fetch("/api/reports/weekly-agenda", {
+      method: "POST",
+      body: JSON.stringify({ week_of: weekOf }),
+    });
+  }
+
+  async generateWeeklyEmail(weekOf?: string): Promise<{
+    subject: string; body_html: string; body_text: string; created_at: string;
+  }> {
+    return this.fetch("/api/reports/weekly-email", {
+      method: "POST",
+      body: JSON.stringify({ week_of: weekOf }),
+    });
+  }
+
+  async getReportHistory(): Promise<Array<{
+    id: string; url: string; title: string; report_type: string; created_at: string;
+  }>> {
+    return this.fetch("/api/reports/history");
   }
 }
 

@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     google_ads_customer_id: str = Field(default="3428920141", description="Google Ads Customer ID")
     google_ads_manager_id: str = Field(default="5405350977", description="Google Ads MCC Manager ID")
 
+    # Google OAuth (for Slides/Docs/Drive write access)
+    google_oauth_client_id: str = Field(default="", description="Google OAuth2 Client ID for Slides/Docs")
+    google_oauth_client_secret: str = Field(default="", description="Google OAuth2 Client Secret for Slides/Docs")
+    google_oauth_redirect_uri: str = Field(
+        default="http://localhost:8001/api/auth/google/callback",
+        description="Google OAuth2 redirect URI",
+    )
+
     # Claude API
     anthropic_api_key: str = ""
 

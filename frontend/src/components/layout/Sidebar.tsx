@@ -14,6 +14,7 @@ import {
   Facebook,
   Search,
   Monitor,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -43,6 +44,11 @@ const navItems = [
     label: "JARVIS",
     href: "/jarvis",
     icon: Bot,
+  },
+  {
+    label: "Reporting",
+    href: "/reporting",
+    icon: FileText,
   },
   {
     label: "Campaigns",

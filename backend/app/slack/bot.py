@@ -281,6 +281,42 @@ class SlackBot:
                 thread_ts=None,
             )
 
+        @self.app.command("/adreview")
+        async def handle_adreview_command(ack, body: dict, client: AsyncWebClient) -> None:
+            """
+            Handle the /adreview slash command.
+            Fetches all active ads with performance data and asks Jarvis
+            to recommend which to pause to get back under the 250 limit.
+            """
+            await ack()
+
+            channel = body["channel_id"]
+            user = body["user_id"]
+            extra_context = body.get("text", "").strip()
+
+            msg = await client.chat_postMessage(
+                channel=channel,
+                text=f"<@{user}> requested an ad review. :hourglass_flowing_sand: Pulling active ad performance data...",
+            )
+
+            query = (
+                "Review all active ads and recommend which ones to pause to get the account "
+                "back under the 250 ad limit. Prioritize pausing based on: zero leads + high spend, "
+                "high CPL vs campaign average, and duplicate creatives. Protect ads still in the "
+                "learning phase (under 14 days). Format your recommendations as a numbered pause list."
+            )
+            if extra_context:
+                query += f"\n\nAdditional context from user: {extra_context}"
+
+            await self.analyze_and_respond(
+                client=client,
+                channel=channel,
+                thread_ts=msg["ts"],
+                user_query=query,
+                mention_ts=msg["ts"],
+                force_ad_performance=True,
+            )
+
         logger.info("slack_handlers_registered")
 
     def get_thread_key(self, channel: str, thread_ts: Optional[str]) -> str:
@@ -444,6 +480,16 @@ class SlackBot:
 
         return performance_data
 
+    _AD_LIMIT_KEYWORDS = [
+        "pause", "ad limit", "250", "over limit", "which ads", "ad review",
+        "adreview", "too many ads", "cut ads", "reduce ads", "active ads",
+    ]
+
+    def _is_ad_limit_query(self, query: str) -> bool:
+        """Return True if the query is related to the ad limit / pausing ads."""
+        q = query.lower()
+        return any(kw in q for kw in self._AD_LIMIT_KEYWORDS)
+
     async def analyze_and_respond(
         self,
         client: AsyncWebClient,
@@ -451,6 +497,7 @@ class SlackBot:
         thread_ts: Optional[str],
         user_query: str,
         mention_ts: str,
+        force_ad_performance: bool = False,
     ) -> None:
         """Perform analysis and respond with results."""
         reply_ts = thread_ts or mention_ts
@@ -640,6 +687,24 @@ class SlackBot:
                         f"=== UPLOADED FILE: '{filename}' (type: {file_type}) ===\n"
                         f"Data: {str(file_data)[:2000]}"
                     )
+
+            # Fetch active ads performance data if this is an ad-limit query
+            if force_ad_performance or self._is_ad_limit_query(user_query):
+                try:
+                    await client.chat_update(
+                        channel=channel,
+                        ts=thinking_msg["ts"],
+                        text=":hourglass_flowing_sand: Fetching active ad performance data...",
+                    )
+                    settings = get_settings()
+                    account_id = get_account_id_from_query(user_query)
+                    ad_perf_data = await self.live_api.get_meta_active_ads_with_performance(account_id)
+                    if ad_perf_data.get("success"):
+                        ad_perf_context = self.live_api.format_active_ads_for_jarvis(ad_perf_data)
+                        additional_context_parts.insert(0, ad_perf_context)
+                        logger.info("ad_performance_context_injected", ad_count=ad_perf_data.get("total_active_ads"))
+                except Exception as e:
+                    logger.warning("ad_performance_fetch_failed", error=str(e))
 
             # Add live API data to context if we fetched it
             if live_api_context:
