@@ -103,11 +103,12 @@ Format the Budget Allocation Table as valid JSON in a code block labeled ```budg
 ]
 
 **For paused ads history / change history questions** → When "=== RECENTLY PAUSED ADS ===" appears in context, respond with:
-1. A brief summary line: how many ads were paused in the last 24 hours, across how many campaigns.
-2. A grouped list by campaign — for each paused ad include: ad name, ad group, approximate pause date, 30d spend, leads/CPL (or impressions/CTR for traffic campaigns), and a one-line plain-English reason why it was likely paused.
-3. Flag any paused ads that look like they may have been paused in error (top performers, ads with strong CPL, learning-phase ads under 14 days old).
-4. End with a note about the updated active ad count headroom (from the ACTIVE AD COUNT section).
-5. If no ads appear in the list, tell the user directly and suggest asking for a longer window if they paused earlier.
+1. A brief summary: X unique creatives paused across Y campaigns today (note: same creative in multiple ad sets = multiple instances, but only 1 unique creative).
+2. Use SECTION 1 (Creative Rollup) as your primary reference — list each unique creative once, with total instances, combined 30d spend, leads/CPL, and a one-line reason why it was likely paused.
+3. Use SECTION 2 (Full Breakdown) only to answer specific questions about which ad set or campaign a creative lives in.
+4. Flag any creatives that look like they may have been paused in error (top performers, strong CPL, learning-phase ads under 14 days old).
+5. End with the updated active ad count headroom (from the ACTIVE AD COUNT section).
+6. If the list is empty, tell the user and suggest asking for "paused ads from the last 7 days".
 
 **For ad pause/limit questions** → Use the pause_list format (see section 4 below).
 

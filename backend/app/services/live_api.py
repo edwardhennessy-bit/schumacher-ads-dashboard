@@ -1348,11 +1348,15 @@ class LiveAPIService:
         since = data.get("date_range", {}).get("since", "")
         until = data.get("date_range", {}).get("until", "")
 
+        # Count unique creative names vs total instances
+        unique_names = len({a["name"] for a in ads})
+
         lines = [
             "=== RECENTLY PAUSED ADS (paused in the last 24 hours) ===",
-            f"Ads paused in the last 24 hours: {total}" + (f" (showing top {max_ads} by 30d spend)" if truncated else ""),
-            f"Performance window shown: {since} to {until} (last 30 days)",
-            "Note: Pause date is derived from updated_time — the last time Meta recorded any change on the ad.",
+            f"Ad instances paused: {total}" + (f" (showing top {max_ads} by 30d spend)" if truncated else "") +
+            (f" | Unique creatives: {unique_names}" if unique_names != total else ""),
+            f"Performance window: {since} to {until} (30 days)",
+            "Note: Same creative name in multiple ad sets = separate instances counted individually.",
             "",
         ]
 
@@ -1361,7 +1365,41 @@ class LiveAPIService:
             lines.append("If you paused ads more than 24 hours ago, ask Jarvis to 'show paused ads from the last 7 days'.")
             return "\n".join(lines)
 
-        # Group by campaign, sort by total 30d spend desc
+        # ── SECTION 1: Creative rollup — one row per unique ad name ─────────
+        by_ad_name: Dict[str, List[dict]] = {}
+        for ad in ads:
+            by_ad_name.setdefault(ad["name"], []).append(ad)
+
+        lines.append("─" * 60)
+        lines.append("SECTION 1 — CREATIVE ROLLUP (unique ad names, all instances combined)")
+        lines.append("─" * 60)
+        lines.append(f"{'Ad Name':<45} {'Copies':>6} {'30d Spend':>10} {'Leads':>6} {'CPL':>8}")
+        lines.append("-" * 80)
+
+        rollup_sorted = sorted(
+            by_ad_name.items(),
+            key=lambda kv: sum(a["spend_30d"] for a in kv[1]),
+            reverse=True,
+        )
+        for ad_name, instances in rollup_sorted:
+            total_spend = sum(a["spend_30d"] for a in instances)
+            total_leads = sum(a["leads_30d"] for a in instances)
+            total_cpl = round(total_spend / total_leads, 2) if total_leads > 0 else None
+            cpl_str = f"${total_cpl:.2f}" if total_cpl else "no leads"
+            count = len(instances)
+            dupe_flag = " ⚠️ x" + str(count) if count > 1 else ""
+
+            name_display = (ad_name[:42] + "...") if len(ad_name) > 45 else ad_name
+            lines.append(
+                f"{name_display:<45} {str(count) + dupe_flag:>6}  ${total_spend:>8,.2f}  {total_leads:>5}  {cpl_str:>8}"
+            )
+        lines.append("")
+
+        # ── SECTION 2: Full breakdown by campaign ────────────────────────────
+        lines.append("─" * 60)
+        lines.append("SECTION 2 — FULL BREAKDOWN BY CAMPAIGN")
+        lines.append("─" * 60)
+
         by_campaign: Dict[str, List[dict]] = {}
         for ad in ads:
             by_campaign.setdefault(ad["campaign_name"], []).append(ad)
@@ -1379,10 +1417,10 @@ class LiveAPIService:
             camp_cpl = round(camp_spend / camp_leads, 2) if camp_leads > 0 else None
             cpl_str = f"${camp_cpl:.2f}" if camp_cpl else "no leads"
 
-            camp_label = "🚗 TRAFFIC CAMPAIGN" if is_traffic else "📣 LEAD-GEN CAMPAIGN"
-            summary = f"   {len(camp_ads)} paused ads | 30d spend: ${camp_spend:,.2f}"
+            camp_label = "🚗 TRAFFIC" if is_traffic else "📣 LEAD-GEN"
+            summary = f"   {len(camp_ads)} paused | 30d spend: ${camp_spend:,.2f}"
             if not is_traffic:
-                summary += f" | 30d leads: {camp_leads} | 30d CPL: {cpl_str}"
+                summary += f" | leads: {camp_leads} | CPL: {cpl_str}"
 
             lines.append(f"\n{camp_label}: {campaign_name}")
             lines.append(summary)
@@ -1391,9 +1429,12 @@ class LiveAPIService:
                 dr = f"{ad['days_running']}d old" if ad["days_running"] is not None else "age unknown"
                 paused_str = f" | paused ~{ad['paused_date']}" if ad["paused_date"] else ""
                 spend_str = f"${ad['spend_30d']:,.2f}"
+                # Flag if this same creative exists in other campaigns too
+                instance_count = len(by_ad_name.get(ad["name"], []))
+                dupe_note = f"  [also in {instance_count - 1} other ad set(s)]" if instance_count > 1 else ""
 
-                lines.append(f"   • {ad['name'][:90]}")
-                lines.append(f"     Ad Set: {ad['adset_name'][:70]} | {dr}{paused_str}")
+                lines.append(f"   • {ad['name'][:80]}{dupe_note}")
+                lines.append(f"     Ad Set: {ad['adset_name'][:65]} | {dr}{paused_str}")
 
                 if is_traffic:
                     impr = ad["impressions_30d"]
@@ -1403,10 +1444,9 @@ class LiveAPIService:
                         f"     30d: spend={spend_str} | impr={impr:,} | CTR={ctr:.2f}% | CPC={cpc_str}"
                     )
                 else:
-                    leads_str = str(ad["leads_30d"])
                     cpl_ad_str = f"${ad['cpl_30d']:.2f}" if ad["cpl_30d"] is not None else "no leads"
                     lines.append(
-                        f"     30d: spend={spend_str} | leads={leads_str} | CPL={cpl_ad_str} | "
+                        f"     30d: spend={spend_str} | leads={ad['leads_30d']} | CPL={cpl_ad_str} | "
                         f"impr={ad['impressions_30d']:,} | CTR={ad['ctr_30d']:.2f}%"
                     )
             lines.append("")
