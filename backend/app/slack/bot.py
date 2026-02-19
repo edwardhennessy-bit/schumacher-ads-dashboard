@@ -689,9 +689,11 @@ class SlackBot:
                 query=user_query[:50]
             )
 
-            # ── Stage 1: Account summary + campaign breakdown ─────────────────
+            # ── Stage 1: Account summary + campaign breakdown + active ad count ─
+            # All three fetched in parallel so Jarvis always has the exact
+            # active ad count in every response — no guessing or asking.
             try:
-                insights_data, campaign_data = await asyncio.gather(
+                insights_data, campaign_data, active_count_data = await asyncio.gather(
                     self.live_api.get_meta_account_insights(
                         account_id=account_id,
                         date_range=date_range,
@@ -701,6 +703,7 @@ class SlackBot:
                         account_id=account_id,
                         date_range=date_range
                     ),
+                    self.live_api.get_meta_active_ads_count(account_id),
                 )
 
                 if insights_data.get("success"):
@@ -708,11 +711,24 @@ class SlackBot:
                     live_data_success = True
                     if campaign_data.get("success"):
                         live_api_context += "\n\n" + self.live_api.format_campaigns_for_context(campaign_data)
+
+                    # Always append the real-time active ad count
+                    if active_count_data.get("success"):
+                        active_count = active_count_data["active_ads"]
+                        headroom = 250 - active_count
+                        live_api_context += (
+                            f"\n\n=== ACTIVE AD COUNT (real-time, today) ===\n"
+                            f"Delivering ads right now: {active_count} / 250 limit\n"
+                            f"Headroom before limit: {headroom} ads\n"
+                            f"Status: {'⚠️ OVER LIMIT' if headroom < 0 else ('🟡 CLOSE TO LIMIT' if headroom < 20 else '🟢 OK')}"
+                        )
+
                     logger.info(
                         "live_data_fetched_successfully",
                         account_id=account_id,
                         date_range=f"{date_range.start_date} to {date_range.end_date}",
                         campaign_count=len(campaign_data.get("campaigns", [])),
+                        active_ads=active_count_data.get("active_ads"),
                     )
                 else:
                     error_msg = insights_data.get("error", "Unknown error")
