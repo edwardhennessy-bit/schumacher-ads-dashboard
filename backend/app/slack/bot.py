@@ -552,17 +552,52 @@ class SlackBot:
         """
         Extract potential ad name fragments from the query to use as search filters.
         Splits on common delimiters and returns non-trivial tokens.
+
+        Handles the case where users prefix the ad name with a sentence like:
+        "How are these ads doing: Winner + floorplans | CAR | MOF | ..."
+        The sentence prefix before the first pipe is stripped down to just the
+        ad-name fragment (everything after the last colon or intro word).
         """
-        # Pull out pipe-delimited tokens if present (e.g. "Winner + floorplans | CAR | MOF")
         if "|" in query:
-            # Take the full pipe-delimited expression as one search term per segment
-            tokens = [t.strip() for t in query.replace("•", "").split("|")]
-            # Also add the full ad name as a search term (everything before the last pipe segment)
-            terms = [t for t in tokens if len(t) > 2]
-            # Reconstruct likely full ad name segments (join adjacent tokens)
+            raw_tokens = [t.strip() for t in query.replace("•", "").split("|")]
+
+            cleaned_tokens = []
+            for i, tok in enumerate(raw_tokens):
+                if i == 0:
+                    # Strip sentence prefix — keep only the ad-name fragment.
+                    # Step 1: split on colon or explicit intro words
+                    cleaned = tok
+                    stripped = re.split(
+                        r"[:]\s*|(?:ads?|these|those|following|creatives?)\s+",
+                        cleaned,
+                        flags=re.IGNORECASE,
+                    )
+                    cleaned = stripped[-1].strip()
+
+                    # Step 2: if still a long sentence, grab phrase after prepositions/verbs
+                    if len(cleaned.split()) > 3:
+                        match = re.search(
+                            r"(?:of|for|on|about|check|pull|get|show|see)\s+(.+)$",
+                            cleaned,
+                            flags=re.IGNORECASE,
+                        )
+                        if match:
+                            cleaned = match.group(1).strip()
+
+                    if cleaned:
+                        cleaned_tokens.append(cleaned)
+                else:
+                    if tok:
+                        cleaned_tokens.append(tok)
+
+            # Filter to non-trivial tokens
+            terms = [t for t in cleaned_tokens if len(t) > 1]
+
+            # Also add joined first-3-segment form as a composite search term
             if len(terms) >= 2:
-                terms.append(" | ".join(terms[:3]))  # first 3 segments often = ad name
-            return list(dict.fromkeys(terms))  # deduplicate preserving order
+                terms.append(" | ".join(terms[:3]))
+
+            return list(dict.fromkeys(terms))  # deduplicate, preserve order
 
         # Otherwise use words longer than 4 chars that aren't stopwords
         stopwords = {"what", "how", "did", "does", "with", "about", "these", "those",
