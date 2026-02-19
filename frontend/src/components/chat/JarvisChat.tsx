@@ -1,10 +1,17 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Send, Bot, User, Loader2, Trash2, Sparkles, PauseCircle, TrendingUp, AlertCircle } from "lucide-react";
+import {
+  Send, Bot, User, Loader2, Trash2, Sparkles,
+  PauseCircle, TrendingUp, AlertCircle, Copy, Check, Mail,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
 
 interface Message {
   id: string;
@@ -35,9 +42,273 @@ interface BudgetRow {
   Reasoning: string;
 }
 
+interface EmailReport {
+  subject: string;
+  body: string;
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
-// ── Pause list renderer ───────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Plain-text email converter
+// Strips all markdown and renders structured blocks as clean, copy-paste-ready text
+// ─────────────────────────────────────────────────────────────────────────────
+
+function convertToEmailText(content: string): string {
+  const lines = content.split("\n");
+  const out: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // ── Special code blocks ─────────────────────────────────────────────────
+    if (trimmed.startsWith("```")) {
+      const blockType = trimmed.replace(/```/g, "").trim().toLowerCase();
+      const blockLines: string[] = [];
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim().startsWith("```")) {
+        blockLines.push(lines[j]);
+        j++;
+      }
+      const rawContent = blockLines.join("\n").trim();
+
+      if (blockType === "email_report") {
+        // Already plain text — inject directly
+        out.push(rawContent);
+        i = j + 1;
+        continue;
+      }
+
+      if (blockType === "pause_list") {
+        try {
+          const items: PauseItem[] = JSON.parse(rawContent);
+          out.push("PAUSE RECOMMENDATIONS");
+          out.push("─".repeat(50));
+          items.forEach((item, idx) => {
+            const cpl = item.cpl_30d ? `  CPL: $${item.cpl_30d.toFixed(2)}` : "";
+            const age = item.days_running !== null ? `  Running: ${item.days_running}d` : "";
+            out.push(`${idx + 1}. ${item.ad_name}`);
+            out.push(`   Campaign: ${item.campaign}`);
+            out.push(`   Ad Set: ${item.adset}`);
+            out.push(`   Spend: $${item.spend_30d.toFixed(2)}  Leads: ${item.leads_30d}${cpl}${age}`);
+            out.push(`   Reason: ${item.reason}`);
+            out.push("");
+          });
+          i = j + 1;
+          continue;
+        } catch { /* fall through */ }
+      }
+
+      if (blockType === "budget_table") {
+        try {
+          const rows: BudgetRow[] = JSON.parse(rawContent);
+          out.push("BUDGET ALLOCATION");
+          out.push("─".repeat(50));
+          rows.forEach((row) => {
+            out.push(`• ${row["Campaign/Tactic"]} (${row.Platform})`);
+            out.push(`  Current: ${row["Current Spend"]}  →  Recommended: ${row["Recommended Spend"]}  (${row["Delta (%)"]})`);
+            out.push(`  ${row.Reasoning}`);
+            out.push("");
+          });
+          i = j + 1;
+          continue;
+        } catch { /* fall through */ }
+      }
+
+      // Other code blocks — skip entirely in email text
+      i = j + 1;
+      continue;
+    }
+
+    // ── Headers → UPPERCASE labels ──────────────────────────────────────────
+    if (trimmed.startsWith("## ")) {
+      const text = trimmed.slice(3).replace(/\*\*/g, "");
+      out.push("");
+      out.push(text.toUpperCase());
+      out.push("─".repeat(Math.min(text.length + 4, 50)));
+      i++; continue;
+    }
+    if (trimmed.startsWith("### ")) {
+      const text = trimmed.slice(4).replace(/\*\*/g, "");
+      out.push("");
+      out.push(text);
+      i++; continue;
+    }
+    if (trimmed.startsWith("# ")) {
+      const text = trimmed.slice(2).replace(/\*\*/g, "");
+      out.push(text.toUpperCase());
+      out.push("═".repeat(Math.min(text.length + 4, 60)));
+      i++; continue;
+    }
+
+    // ── Lists ───────────────────────────────────────────────────────────────
+    const ulMatch = trimmed.match(/^[-*•]\s+(.+)/);
+    if (ulMatch) {
+      out.push(`• ${stripInlineMarkdown(ulMatch[1])}`);
+      i++; continue;
+    }
+    const olMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
+    if (olMatch) {
+      out.push(`${olMatch[1]}. ${stripInlineMarkdown(olMatch[2])}`);
+      i++; continue;
+    }
+
+    // ── Horizontal rules → blank line ───────────────────────────────────────
+    if (trimmed.match(/^[-*_]{3,}$/)) {
+      out.push("");
+      i++; continue;
+    }
+
+    // ── Regular text ────────────────────────────────────────────────────────
+    if (trimmed) {
+      out.push(stripInlineMarkdown(trimmed));
+    } else {
+      out.push("");
+    }
+    i++;
+  }
+
+  // Collapse 3+ consecutive blank lines to 2
+  const collapsed = out.join("\n").replace(/\n{3,}/g, "\n\n");
+  return collapsed.trim();
+}
+
+function stripInlineMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")   // bold
+    .replace(/\*(.+?)\*/g, "$1")        // italic
+    .replace(/`([^`]+)`/g, "$1")        // inline code
+    .replace(/\[(.+?)\]\(.+?\)/g, "$1") // links
+    .trim();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Copy-for-email button — appears on hover over every Jarvis message
+// ─────────────────────────────────────────────────────────────────────────────
+
+function CopyEmailButton({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    const emailText = convertToEmailText(content);
+    try {
+      await navigator.clipboard.writeText(emailText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback for older browsers
+      const el = document.createElement("textarea");
+      el.value = emailText;
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, [content]);
+
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy as plain text for email"
+      className={cn(
+        "flex items-center gap-1.5 text-xs px-2 py-1 rounded transition-all duration-150",
+        copied
+          ? "text-green-600 dark:text-green-400 bg-green-500/10"
+          : "text-muted-foreground hover:text-foreground hover:bg-muted"
+      )}
+    >
+      {copied ? (
+        <><Check className="h-3 w-3" /><span>Copied!</span></>
+      ) : (
+        <><Copy className="h-3 w-3" /><span>Copy for email</span></>
+      )}
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// email_report block renderer — subject line + body, clean visual treatment
+// ─────────────────────────────────────────────────────────────────────────────
+
+function EmailReportBlock({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  // Parse optional subject line: first line starting with "Subject:" or "SUBJECT:"
+  const lines = content.trim().split("\n");
+  let subject = "";
+  let body = content.trim();
+
+  if (lines[0].match(/^subject:/i)) {
+    subject = lines[0].replace(/^subject:\s*/i, "").trim();
+    body = lines.slice(1).join("\n").trim();
+  }
+
+  const handleCopy = useCallback(async () => {
+    const full = subject ? `Subject: ${subject}\n\n${body}` : body;
+    try {
+      await navigator.clipboard.writeText(full);
+    } catch {
+      const el = document.createElement("textarea");
+      el.value = full;
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [subject, body]);
+
+  return (
+    <div className="my-4 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 overflow-hidden">
+      {/* Header bar */}
+      <div className="flex items-center justify-between px-4 py-2.5 bg-blue-100/60 dark:bg-blue-900/30 border-b border-blue-200 dark:border-blue-800">
+        <div className="flex items-center gap-2">
+          <Mail className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+          <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">Client Email Report</span>
+        </div>
+        <button
+          onClick={handleCopy}
+          className={cn(
+            "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md font-medium transition-all",
+            copied
+              ? "bg-green-500 text-white"
+              : "bg-blue-600 hover:bg-blue-700 text-white"
+          )}
+        >
+          {copied ? <><Check className="h-3 w-3" /> Copied!</> : <><Copy className="h-3 w-3" /> Copy</>}
+        </button>
+      </div>
+
+      {/* Subject line */}
+      {subject && (
+        <div className="px-4 py-2 border-b border-blue-200 dark:border-blue-800 bg-white/40 dark:bg-black/10">
+          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Subject: </span>
+          <span className="text-xs font-semibold text-foreground">{subject}</span>
+        </div>
+      )}
+
+      {/* Body — plain text, monospace feel but readable */}
+      <div className="px-4 py-3">
+        <pre className="text-sm leading-relaxed whitespace-pre-wrap font-sans text-foreground">
+          {body}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pause list renderer
+// ─────────────────────────────────────────────────────────────────────────────
 
 function PauseListBlock({ items }: { items: PauseItem[] }) {
   return (
@@ -50,23 +321,14 @@ function PauseListBlock({ items }: { items: PauseItem[] }) {
         const hasSpend = item.spend_30d > 0;
         const hasLeads = item.leads_30d > 0;
         const isZeroActivity = !hasSpend && !hasLeads;
-
         return (
-          <div
-            key={idx}
-            className="rounded-lg border border-border bg-background p-4 space-y-2"
-          >
-            {/* Header row: index + ad name */}
+          <div key={idx} className="rounded-lg border border-border bg-background p-4 space-y-2">
             <div className="flex items-start gap-2">
               <span className="flex-shrink-0 h-5 w-5 rounded-full bg-orange-500/10 text-orange-500 text-xs font-bold flex items-center justify-center mt-0.5">
                 {idx + 1}
               </span>
-              <p className="text-sm font-semibold text-foreground leading-tight">
-                {item.ad_name}
-              </p>
+              <p className="text-sm font-semibold text-foreground leading-tight">{item.ad_name}</p>
             </div>
-
-            {/* Campaign / Ad Set */}
             <div className="pl-7 space-y-0.5">
               <p className="text-xs text-muted-foreground">
                 <span className="font-medium text-foreground/70">Campaign:</span> {item.campaign}
@@ -75,8 +337,6 @@ function PauseListBlock({ items }: { items: PauseItem[] }) {
                 <span className="font-medium text-foreground/70">Ad Set:</span> {item.adset}
               </p>
             </div>
-
-            {/* Metrics row */}
             <div className="pl-7 flex flex-wrap gap-3 text-xs">
               {item.days_running !== null && (
                 <span className="text-muted-foreground">
@@ -99,8 +359,6 @@ function PauseListBlock({ items }: { items: PauseItem[] }) {
                 <span className="text-xs text-muted-foreground italic">No activity in window</span>
               )}
             </div>
-
-            {/* Reason */}
             <div className="pl-7">
               <p className="text-xs text-orange-600 dark:text-orange-400 flex items-start gap-1.5">
                 <AlertCircle className="h-3 w-3 flex-shrink-0 mt-0.5" />
@@ -114,7 +372,9 @@ function PauseListBlock({ items }: { items: PauseItem[] }) {
   );
 }
 
-// ── Budget table renderer ─────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Budget table renderer
+// ─────────────────────────────────────────────────────────────────────────────
 
 function BudgetTableBlock({ rows }: { rows: BudgetRow[] }) {
   return (
@@ -143,27 +403,17 @@ function BudgetTableBlock({ rows }: { rows: BudgetRow[] }) {
                 <tr key={idx} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                   <td className="px-3 py-2">
                     <div className="font-medium text-foreground">{row["Campaign/Tactic"]}</div>
-                    {row.Platform && (
-                      <div className="text-muted-foreground text-[10px]">{row.Platform}</div>
-                    )}
+                    {row.Platform && <div className="text-muted-foreground text-[10px]">{row.Platform}</div>}
                   </td>
-                  <td className="px-3 py-2 text-right text-muted-foreground whitespace-nowrap">
-                    {row["Current Spend"]}
-                  </td>
-                  <td className="px-3 py-2 text-right font-medium text-foreground whitespace-nowrap">
-                    {row["Recommended Spend"]}
-                  </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground whitespace-nowrap">{row["Current Spend"]}</td>
+                  <td className="px-3 py-2 text-right font-medium text-foreground whitespace-nowrap">{row["Recommended Spend"]}</td>
                   <td className={cn(
                     "px-3 py-2 text-right font-semibold whitespace-nowrap",
                     isPositive ? "text-green-600 dark:text-green-400" :
                     isNegative ? "text-red-500 dark:text-red-400" :
                     "text-muted-foreground"
-                  )}>
-                    {delta}
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground leading-relaxed max-w-[240px]">
-                    {row.Reasoning}
-                  </td>
+                  )}>{delta}</td>
+                  <td className="px-3 py-2 text-muted-foreground leading-relaxed max-w-[240px]">{row.Reasoning}</td>
                 </tr>
               );
             })}
@@ -174,7 +424,9 @@ function BudgetTableBlock({ rows }: { rows: BudgetRow[] }) {
   );
 }
 
-// ── Inline text formatting ────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Inline text formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 function parseInlineFormatting(text: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
@@ -192,16 +444,10 @@ function parseInlineFormatting(text: string): React.ReactNode[] {
       codeMatch ? { type: "code", match: codeMatch, index: codeMatch.index! } : null,
     ].filter(Boolean).sort((a, b) => a!.index - b!.index);
 
-    if (matches.length === 0) {
-      parts.push(<span key={key++}>{remaining}</span>);
-      break;
-    }
+    if (matches.length === 0) { parts.push(<span key={key++}>{remaining}</span>); break; }
 
     const first = matches[0]!;
-
-    if (first.index > 0) {
-      parts.push(<span key={key++}>{remaining.slice(0, first.index)}</span>);
-    }
+    if (first.index > 0) parts.push(<span key={key++}>{remaining.slice(0, first.index)}</span>);
 
     if (first.type === "bold") {
       parts.push(<strong key={key++} className="font-semibold">{first.match[1]}</strong>);
@@ -214,14 +460,14 @@ function parseInlineFormatting(text: string): React.ReactNode[] {
         </code>
       );
     }
-
     remaining = remaining.slice(first.index + first.match[0].length);
   }
-
   return parts;
 }
 
-// ── Markdown table renderer ───────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Markdown table renderer
+// ─────────────────────────────────────────────────────────────────────────────
 
 function parseTable(lines: string[], startIndex: number): { element: React.ReactNode; endIndex: number } {
   const tableLines: string[] = [];
@@ -259,11 +505,12 @@ function parseTable(lines: string[], startIndex: number): { element: React.React
       </table>
     </div>
   );
-
   return { element, endIndex: i - 1 };
 }
 
-// ── Code block renderer (fallback for non-special blocks) ────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Code block renderer (fallback)
+// ─────────────────────────────────────────────────────────────────────────────
 
 function parseCodeBlock(lines: string[], startIndex: number): { element: React.ReactNode; endIndex: number } {
   const language = lines[startIndex].replace(/```/g, "").trim();
@@ -291,7 +538,9 @@ function parseCodeBlock(lines: string[], startIndex: number): { element: React.R
   return { element, endIndex: i };
 }
 
-// ── Main message formatter ────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Main message formatter
+// ─────────────────────────────────────────────────────────────────────────────
 
 function formatMessage(content: string): React.ReactNode {
   const lines = content.split("\n");
@@ -301,142 +550,100 @@ function formatMessage(content: string): React.ReactNode {
   let listType: "ul" | "ol" | null = null;
 
   const flushList = () => {
-    if (listItems.length > 0) {
-      if (listType === "ul") {
-        elements.push(
-          <ul key={`list-${elements.length}`} className="my-2 ml-4 space-y-1 list-disc">
-            {listItems}
-          </ul>
-        );
-      } else {
-        elements.push(
-          <ol key={`list-${elements.length}`} className="my-2 ml-4 space-y-1 list-decimal">
-            {listItems}
-          </ol>
-        );
-      }
-      listItems = [];
-      listType = null;
-    }
+    if (listItems.length === 0) return;
+    elements.push(
+      listType === "ul"
+        ? <ul key={`list-${elements.length}`} className="my-2 ml-4 space-y-1 list-disc">{listItems}</ul>
+        : <ol key={`list-${elements.length}`} className="my-2 ml-4 space-y-1 list-decimal">{listItems}</ol>
+    );
+    listItems = [];
+    listType = null;
   };
 
   while (i < lines.length) {
     const line = lines[i];
     const trimmedLine = line.trim();
 
-    // ── Special code blocks: pause_list and budget_table ─────────────────
+    // ── Special code blocks ─────────────────────────────────────────────────
     if (trimmedLine.startsWith("```")) {
       flushList();
       const blockType = trimmedLine.replace(/```/g, "").trim().toLowerCase();
-
-      // Collect block content
       const blockLines: string[] = [];
       let j = i + 1;
-      while (j < lines.length && !lines[j].startsWith("```")) {
+      while (j < lines.length && !lines[j].trim().startsWith("```")) {
         blockLines.push(lines[j]);
         j++;
       }
       const rawContent = blockLines.join("\n").trim();
 
+      if (blockType === "email_report") {
+        elements.push(<EmailReportBlock key={`email-${i}`} content={rawContent} />);
+        i = j + 1; continue;
+      }
       if (blockType === "pause_list") {
         try {
           const items: PauseItem[] = JSON.parse(rawContent);
           elements.push(<PauseListBlock key={`pause-${i}`} items={items} />);
-          i = j + 1;
-          continue;
-        } catch {
-          // Fall through to raw code block
-        }
+          i = j + 1; continue;
+        } catch { /* fall through */ }
       }
-
       if (blockType === "budget_table") {
         try {
           const rows: BudgetRow[] = JSON.parse(rawContent);
           elements.push(<BudgetTableBlock key={`budget-${i}`} rows={rows} />);
-          i = j + 1;
-          continue;
-        } catch {
-          // Fall through to raw code block
-        }
+          i = j + 1; continue;
+        } catch { /* fall through */ }
       }
 
-      // All other code blocks: render as formatted code
       const { element, endIndex } = parseCodeBlock(lines, i);
       elements.push(element);
-      i = endIndex + 1;
-      continue;
+      i = endIndex + 1; continue;
     }
 
-    // ── Markdown table ────────────────────────────────────────────────────
+    // ── Markdown table ──────────────────────────────────────────────────────
     if (trimmedLine.includes("|") && i + 1 < lines.length && lines[i + 1].match(/^[\s\-|:]+$/)) {
       flushList();
       const { element, endIndex } = parseTable(lines, i);
-      if (element) {
-        elements.push(element);
-        i = endIndex + 1;
-        continue;
-      }
+      if (element) { elements.push(element); i = endIndex + 1; continue; }
     }
 
-    // ── Headers ───────────────────────────────────────────────────────────
+    // ── Headers ─────────────────────────────────────────────────────────────
     if (trimmedLine.startsWith("### ")) {
       flushList();
-      elements.push(
-        <h3 key={i} className="text-sm font-bold mt-5 mb-1.5 text-foreground tracking-tight">
-          {parseInlineFormatting(trimmedLine.slice(4))}
-        </h3>
-      );
+      elements.push(<h3 key={i} className="text-sm font-bold mt-5 mb-1.5 text-foreground tracking-tight">{parseInlineFormatting(trimmedLine.slice(4))}</h3>);
       i++; continue;
     }
     if (trimmedLine.startsWith("## ")) {
       flushList();
-      elements.push(
-        <h2 key={i} className="text-base font-bold mt-5 mb-2 text-foreground border-b border-border pb-1.5">
-          {parseInlineFormatting(trimmedLine.slice(3))}
-        </h2>
-      );
+      elements.push(<h2 key={i} className="text-base font-bold mt-5 mb-2 text-foreground border-b border-border pb-1.5">{parseInlineFormatting(trimmedLine.slice(3))}</h2>);
       i++; continue;
     }
     if (trimmedLine.startsWith("# ")) {
       flushList();
-      elements.push(
-        <h1 key={i} className="text-lg font-bold mt-5 mb-2 text-foreground">
-          {parseInlineFormatting(trimmedLine.slice(2))}
-        </h1>
-      );
+      elements.push(<h1 key={i} className="text-lg font-bold mt-5 mb-2 text-foreground">{parseInlineFormatting(trimmedLine.slice(2))}</h1>);
       i++; continue;
     }
 
-    // ── Horizontal rule ───────────────────────────────────────────────────
+    // ── HR ───────────────────────────────────────────────────────────────────
     if (trimmedLine.match(/^[-*_]{3,}$/)) {
       flushList();
       elements.push(<hr key={i} className="my-4 border-border" />);
       i++; continue;
     }
 
-    // ── Unordered list ────────────────────────────────────────────────────
+    // ── Lists ────────────────────────────────────────────────────────────────
     if (trimmedLine.match(/^[-*•]\s+/)) {
       if (listType !== "ul") { flushList(); listType = "ul"; }
-      listItems.push(
-        <li key={`li-${i}`} className="text-sm leading-relaxed">
-          {parseInlineFormatting(trimmedLine.replace(/^[-*•]\s+/, ""))}
-        </li>
-      );
+      listItems.push(<li key={`li-${i}`} className="text-sm leading-relaxed">{parseInlineFormatting(trimmedLine.replace(/^[-*•]\s+/, ""))}</li>);
       i++; continue;
     }
-
-    // ── Ordered list ──────────────────────────────────────────────────────
     if (trimmedLine.match(/^\d+\.\s+/)) {
       if (listType !== "ol") { flushList(); listType = "ol"; }
-      listItems.push(
-        <li key={`li-${i}`} className="text-sm leading-relaxed">
-          {parseInlineFormatting(trimmedLine.replace(/^\d+\.\s+/, ""))}
-        </li>
-      );
+      listItems.push(<li key={`li-${i}`} className="text-sm leading-relaxed">{parseInlineFormatting(trimmedLine.replace(/^\d+\.\s+/, ""))}</li>);
       i++; continue;
     }
 
-    // ── Empty line ────────────────────────────────────────────────────────
+    // ── Empty line ───────────────────────────────────────────────────────────
     if (!trimmedLine) {
       flushList();
       const lastEl = elements[elements.length - 1];
@@ -446,13 +653,9 @@ function formatMessage(content: string): React.ReactNode {
       i++; continue;
     }
 
-    // ── Regular paragraph ─────────────────────────────────────────────────
+    // ── Paragraph ────────────────────────────────────────────────────────────
     flushList();
-    elements.push(
-      <p key={i} className="text-sm leading-relaxed">
-        {parseInlineFormatting(trimmedLine)}
-      </p>
-    );
+    elements.push(<p key={i} className="text-sm leading-relaxed">{parseInlineFormatting(trimmedLine)}</p>);
     i++;
   }
 
@@ -460,13 +663,16 @@ function formatMessage(content: string): React.ReactNode {
   return <div className="space-y-0.5">{elements}</div>;
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Main JarvisChat component
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function JarvisChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId] = useState(() => `web-${Date.now()}`);
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -474,13 +680,14 @@ export function JarvisChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const sendMessage = async () => {
-    if (!input.trim() || isLoading) return;
+  const sendMessage = async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim();
+    if (!text || isLoading) return;
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       role: "user",
-      content: input.trim(),
+      content: text,
       timestamp: new Date(),
     };
 
@@ -492,7 +699,7 @@ export function JarvisChat() {
       const response = await fetch(`${API_BASE}/api/chat/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMessage.content, session_id: sessionId }),
+        body: JSON.stringify({ message: text, session_id: sessionId }),
       });
 
       if (!response.ok) throw new Error("Failed to get response");
@@ -532,6 +739,13 @@ export function JarvisChat() {
     }
   };
 
+  const quickActions = [
+    { emoji: "📊", text: "How did we perform last 7 days?" },
+    { emoji: "⏸️", text: "Which campaigns should I pause?" },
+    { emoji: "💰", text: "How should I reallocate the remaining budget?" },
+    { emoji: "📧", text: "Write a client email report for MTD performance" },
+  ];
+
   return (
     <Card className="flex flex-col h-[calc(100vh-8rem)]">
       <CardHeader className="border-b flex-shrink-0 py-4">
@@ -565,16 +779,11 @@ export function JarvisChat() {
             <p className="text-sm max-w-md">
               I&apos;m your AI-powered Paid Media Analyst. Ask me about campaign performance, budget allocation, or specific ad creatives.
             </p>
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-              {[
-                { emoji: "📊", text: "How did we perform last 7 days?" },
-                { emoji: "⏸️", text: "Which campaigns should I pause?" },
-                { emoji: "💰", text: "How should I reallocate the remaining budget?" },
-                { emoji: "📈", text: "Compare MTD vs last month" },
-              ].map(({ emoji, text }) => (
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs w-full max-w-sm">
+              {quickActions.map(({ emoji, text }) => (
                 <button
                   key={text}
-                  onClick={() => setInput(text)}
+                  onClick={() => sendMessage(text)}
                   className="px-3 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-left"
                 >
                   {emoji} {text}
@@ -587,12 +796,15 @@ export function JarvisChat() {
             <div
               key={message.id}
               className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}
+              onMouseEnter={() => message.role === "assistant" && setHoveredMessageId(message.id)}
+              onMouseLeave={() => setHoveredMessageId(null)}
             >
               {message.role === "assistant" && (
                 <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-1">
                   <Bot className="h-4 w-4 text-primary" />
                 </div>
               )}
+
               <div className={cn(
                 "rounded-lg max-w-[85%]",
                 message.role === "user"
@@ -602,16 +814,34 @@ export function JarvisChat() {
                 {message.role === "user" ? (
                   <p className="text-sm">{message.content}</p>
                 ) : (
-                  <div className="text-foreground">
-                    {formatMessage(message.content)}
-                  </div>
-                )}
-                {message.dataSource && (
-                  <p className="text-xs mt-3 pt-2 border-t border-border/50 text-muted-foreground">
-                    📊 {message.dataSource}
-                  </p>
+                  <>
+                    <div className="text-foreground">
+                      {formatMessage(message.content)}
+                    </div>
+
+                    {/* Action bar — copy button + data source */}
+                    <div className={cn(
+                      "flex items-center justify-between mt-3 pt-2 border-t border-border/40 transition-opacity duration-150",
+                      hoveredMessageId === message.id ? "opacity-100" : "opacity-0"
+                    )}>
+                      <CopyEmailButton content={message.content} />
+                      {message.dataSource && (
+                        <p className="text-xs text-muted-foreground">
+                          📊 {message.dataSource}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Always-visible data source when not hovered */}
+                    {message.dataSource && hoveredMessageId !== message.id && (
+                      <p className="text-xs mt-2 pt-2 border-t border-border/40 text-muted-foreground">
+                        📊 {message.dataSource}
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
+
               {message.role === "user" && (
                 <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0 mt-1">
                   <User className="h-4 w-4 text-primary-foreground" />
@@ -643,12 +873,12 @@ export function JarvisChat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask JARVIS about campaign performance, specific ads, or budget…"
+            placeholder="Ask JARVIS about campaigns, specific ads, or budget — or request a client email report…"
             className="flex-1 resize-none rounded-lg border bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary min-h-[48px] max-h-[120px]"
             rows={1}
             disabled={isLoading}
           />
-          <Button onClick={sendMessage} disabled={!input.trim() || isLoading} size="lg" className="px-4">
+          <Button onClick={() => sendMessage()} disabled={!input.trim() || isLoading} size="lg" className="px-4">
             {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
           </Button>
         </div>
