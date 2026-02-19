@@ -47,10 +47,23 @@ _AD_LOOKUP_KEYWORDS = [
     "modelhome", "winner +", "variant",
 ]
 
+_PAUSED_ADS_KEYWORDS = [
+    "paused ads", "what was paused", "what did i pause", "what have i paused",
+    "which ads were paused", "ads i paused", "show paused", "list paused",
+    "recently paused", "just paused", "ads paused", "paused creatives",
+    "change history", "what changed", "paused today", "paused this week",
+    "paused yesterday",
+]
+
 
 def _is_ad_limit_query(query: str) -> bool:
     q = query.lower()
     return any(kw in q for kw in _AD_LIMIT_KEYWORDS)
+
+
+def _is_paused_ads_query(query: str) -> bool:
+    q = query.lower()
+    return any(kw in q for kw in _PAUSED_ADS_KEYWORDS)
 
 
 def _is_ad_lookup_query(query: str) -> bool:
@@ -169,12 +182,14 @@ async def send_message(chat_message: ChatMessage):
         account_id = get_account_id_from_query(user_message)
 
         # Decide which extra fetch stages we need
-        needs_ad_limit = _is_ad_limit_query(user_message)
-        needs_ad_lookup = (not needs_ad_limit) and _is_ad_lookup_query(user_message)
+        needs_paused_ads = _is_paused_ads_query(user_message)
+        needs_ad_limit = (not needs_paused_ads) and _is_ad_limit_query(user_message)
+        needs_ad_lookup = (not needs_paused_ads) and (not needs_ad_limit) and _is_ad_lookup_query(user_message)
 
         logger.info(
             "chat_query_routing",
             date_range=f"{date_range.start_date} to {date_range.end_date}",
+            needs_paused_ads=needs_paused_ads,
             needs_ad_limit=needs_ad_limit,
             needs_ad_lookup=needs_ad_lookup,
         )
@@ -230,6 +245,7 @@ async def send_message(chat_message: ChatMessage):
                         date_range=f"{date_range.start_date} to {date_range.end_date}",
                         campaign_count=len(campaign_data.get("campaigns", [])),
                         active_ads=active_count_data.get("active_ads"),
+                        needs_paused_ads=needs_paused_ads,
                         needs_ad_lookup=needs_ad_lookup,
                         needs_ad_limit=needs_ad_limit,
                     )
@@ -250,8 +266,24 @@ async def send_message(chat_message: ChatMessage):
                     f"Note: Could not fetch live data ({str(e)}).\n"
                 )
 
-            # ── Stage 2a: Active ads inventory (pause/limit queries) ──────────
-            if needs_ad_limit:
+            # ── Stage 2a: Paused ads history (change history queries) ────────
+            if needs_paused_ads:
+                try:
+                    paused_data = await live_api.get_meta_recently_paused_ads(account_id)
+                    if paused_data.get("success"):
+                        paused_context = live_api.format_paused_ads_for_context(paused_data)
+                        additional_context_parts.insert(0, paused_context)
+                        logger.info(
+                            "paused_ads_context_injected",
+                            ad_count=paused_data.get("total_paused_ads"),
+                        )
+                    else:
+                        logger.warning("paused_ads_fetch_failed", error=paused_data.get("error"))
+                except Exception as e:
+                    logger.warning("paused_ads_fetch_error", error=str(e))
+
+            # ── Stage 2b: Active ads inventory (pause/limit queries) ──────────
+            elif needs_ad_limit:
                 try:
                     ad_perf_data = await live_api.get_meta_active_ads_with_performance(account_id)
                     if ad_perf_data.get("success"):
@@ -264,7 +296,7 @@ async def send_message(chat_message: ChatMessage):
                 except Exception as e:
                     logger.warning("ad_performance_fetch_failed", error=str(e))
 
-            # ── Stage 2b: Ad-level creative lookup ────────────────────────────
+            # ── Stage 2c: Ad-level creative lookup ────────────────────────────
             elif needs_ad_lookup:
                 try:
                     search_terms = _extract_search_terms(user_message)
@@ -306,7 +338,7 @@ async def send_message(chat_message: ChatMessage):
             session_id=session_id,
             history_turns=len(conversation_history) // 2,
             has_live_context=bool(live_api_context),
-            has_ad_context=needs_ad_lookup or needs_ad_limit,
+            has_ad_context=needs_paused_ads or needs_ad_lookup or needs_ad_limit,
         )
 
         # Get analysis from JARVIS

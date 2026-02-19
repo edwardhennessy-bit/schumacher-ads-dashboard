@@ -532,6 +532,20 @@ class SlackBot:
         "modelhome", "winner +", "variant",
     ]
 
+    # Keywords that signal the user wants to see recently paused ads / change history
+    _PAUSED_ADS_KEYWORDS = [
+        "paused ads", "what was paused", "what did i pause", "what have i paused",
+        "which ads were paused", "ads i paused", "show paused", "list paused",
+        "recently paused", "just paused", "ads paused", "paused creatives",
+        "change history", "what changed", "paused today", "paused this week",
+        "paused yesterday",
+    ]
+
+    def _is_paused_ads_query(self, query: str) -> bool:
+        """Return True if the user is asking to see recently paused ads / change history."""
+        q = query.lower()
+        return any(kw in q for kw in self._PAUSED_ADS_KEYWORDS)
+
     def _is_ad_limit_query(self, query: str) -> bool:
         """Return True if the query is related to the ad limit / pausing ads."""
         q = query.lower()
@@ -689,13 +703,16 @@ class SlackBot:
         account_id = get_account_id_from_query(user_query)
 
         # Decide which extra fetch stages we'll need
-        needs_ad_limit = force_ad_performance or self._is_ad_limit_query(user_query)
-        needs_ad_lookup = (not needs_ad_limit) and self._is_ad_lookup_query(user_query)
+        needs_paused_ads = self._is_paused_ads_query(user_query)
+        needs_ad_limit = (not needs_paused_ads) and (force_ad_performance or self._is_ad_limit_query(user_query))
+        needs_ad_lookup = (not needs_paused_ads) and (not needs_ad_limit) and self._is_ad_lookup_query(user_query)
 
         # Build the step list for the status bar
         base_steps: List[tuple] = [
             ("Account & campaign data", "active"),
         ]
+        if needs_paused_ads:
+            base_steps.append(("Paused ads history", "pending"))
         if needs_ad_limit:
             base_steps.append(("Active ads inventory", "pending"))
         if needs_ad_lookup:
@@ -783,7 +800,12 @@ class SlackBot:
                 )
 
             # Mark stage 1 done, activate next stage
-            if needs_ad_limit:
+            if needs_paused_ads:
+                await self._update_status(client, channel, ts, steps_with({
+                    "Account & campaign data": "done",
+                    "Paused ads history": "active",
+                }), date_range)
+            elif needs_ad_limit:
                 await self._update_status(client, channel, ts, steps_with({
                     "Account & campaign data": "done",
                     "Active ads inventory": "active",
@@ -890,8 +912,27 @@ class SlackBot:
                         f"Data: {str(file_data)[:2000]}"
                     )
 
-            # ── Stage 2a: Active ads inventory (pause/limit queries) ──────────
-            if needs_ad_limit:
+            # ── Stage 2a: Paused ads history (change history queries) ────────
+            if needs_paused_ads:
+                try:
+                    paused_data = await self.live_api.get_meta_recently_paused_ads(account_id)
+                    if paused_data.get("success"):
+                        paused_context = self.live_api.format_paused_ads_for_context(paused_data)
+                        additional_context_parts.insert(0, paused_context)
+                        logger.info("paused_ads_context_injected", ad_count=paused_data.get("total_paused_ads"))
+                    else:
+                        logger.warning("paused_ads_fetch_failed", error=paused_data.get("error"))
+                except Exception as e:
+                    logger.warning("paused_ads_fetch_error", error=str(e))
+
+                await self._update_status(client, channel, ts, steps_with({
+                    "Account & campaign data": "done",
+                    "Paused ads history": "done",
+                    "Thinking…": "active",
+                }), date_range)
+
+            # ── Stage 2b: Active ads inventory (pause/limit queries) ──────────
+            elif needs_ad_limit:
                 try:
                     ad_perf_data = await self.live_api.get_meta_active_ads_with_performance(account_id)
                     if ad_perf_data.get("success"):
@@ -907,7 +948,7 @@ class SlackBot:
                     "Thinking…": "active",
                 }), date_range)
 
-            # ── Stage 2b: Ad-level creative lookup ────────────────────────────
+            # ── Stage 2c: Ad-level creative lookup ────────────────────────────
             elif needs_ad_lookup:
                 try:
                     search_terms = self._extract_search_terms(user_query)

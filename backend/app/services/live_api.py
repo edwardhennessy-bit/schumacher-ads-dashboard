@@ -1140,6 +1140,257 @@ class LiveAPIService:
 
         return "\n".join(lines)
 
+    async def get_meta_recently_paused_ads(
+        self,
+        account_id: str,
+        days_back: int = 30,
+    ) -> Dict[str, Any]:
+        """
+        Fetch all PAUSED ads with their recent performance metrics.
+
+        Uses effective_status=PAUSED to pull every ad that is currently paused,
+        enriched with 30-day performance data so Jarvis can explain WHY each ad
+        was (or should have been) paused based on its metrics.
+
+        Also pulls `updated_time` on each ad, which reflects when Meta last
+        recorded a status change — a proxy for "when was this paused."
+
+        Args:
+            account_id: Meta ad account ID.
+            days_back: Performance window in days (default 30).
+
+        Returns:
+            Dictionary with paused ads list, each enriched with:
+              - campaign_name, adset_name
+              - days_running, paused_date (from updated_time)
+              - spend, impressions, clicks, leads, CPL (last 30d)
+              - is_traffic_campaign flag
+        """
+        import json as _json
+        from datetime import date, timedelta
+
+        if not self.meta_token:
+            return {"success": False, "error": "Meta API token not configured"}
+
+        today = date.today()
+        since = (today - timedelta(days=days_back)).isoformat()
+        until = today.isoformat()
+
+        paused_filter = _json.dumps([{
+            "field": "effective_status",
+            "operator": "IN",
+            "value": ["PAUSED"],
+        }])
+
+        async def paginate(client: httpx.AsyncClient, url: str, params: dict) -> List[dict]:
+            results = []
+            while url:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                results.extend(data.get("data", []))
+                url = data.get("paging", {}).get("next")
+                params = {}
+            return results
+
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                # Fetch all PAUSED ads with embedded performance insights
+                ads_raw = await paginate(client, f"{META_API_BASE}/{account_id}/ads", {
+                    "access_token": self.meta_token,
+                    "fields": (
+                        "id,name,effective_status,adset_id,campaign_id,"
+                        "created_time,updated_time,"
+                        f"insights.time_range({{'since':'{since}','until':'{until}'}})"
+                        "{spend,impressions,clicks,actions,ctr,cpc,cpm}"
+                    ),
+                    "filtering": paused_filter,
+                    "limit": 500,
+                })
+
+                # Fetch campaign and adset names (no status filter — include all)
+                campaigns_raw, adsets_raw = await asyncio.gather(
+                    paginate(client, f"{META_API_BASE}/{account_id}/campaigns", {
+                        "access_token": self.meta_token,
+                        "fields": "id,name",
+                        "limit": 200,
+                    }),
+                    paginate(client, f"{META_API_BASE}/{account_id}/adsets", {
+                        "access_token": self.meta_token,
+                        "fields": "id,name,campaign_id",
+                        "limit": 500,
+                    }),
+                )
+
+            campaign_names = {c["id"]: c["name"] for c in campaigns_raw}
+            adset_names = {a["id"]: a["name"] for a in adsets_raw}
+
+            enriched_ads = []
+            for ad in ads_raw:
+                insights_rows = ad.get("insights", {}).get("data", [])
+                row = insights_rows[0] if insights_rows else {}
+
+                spend = float(row.get("spend", 0))
+                impressions = int(row.get("impressions", 0))
+                clicks = int(row.get("clicks", 0))
+                ctr = float(row.get("ctr", 0))
+                cpc = float(row.get("cpc", 0))
+                cpm = float(row.get("cpm", 0))
+                leads = 0
+                for action in row.get("actions", []):
+                    if action.get("action_type") == "lead":
+                        leads = int(action.get("value", 0))
+                        break
+                cpl = round(spend / leads, 2) if leads > 0 else None
+
+                # Days running (created → today)
+                created_raw = ad.get("created_time", "")
+                days_running = None
+                if created_raw:
+                    try:
+                        created_dt = datetime.fromisoformat(created_raw.replace("+0000", "+00:00"))
+                        days_running = (datetime.now(created_dt.tzinfo) - created_dt).days
+                    except Exception:
+                        pass
+
+                # Paused date — updated_time is a proxy for last status change
+                paused_date = None
+                updated_raw = ad.get("updated_time", "")
+                if updated_raw:
+                    try:
+                        updated_dt = datetime.fromisoformat(updated_raw.replace("+0000", "+00:00"))
+                        paused_date = updated_dt.strftime("%Y-%m-%d")
+                    except Exception:
+                        pass
+
+                campaign_id = ad.get("campaign_id", "")
+                adset_id = ad.get("adset_id", "")
+                campaign_name = campaign_names.get(campaign_id, "Unknown Campaign")
+
+                traffic_keywords = ["open house", "visit", "visits"]
+                is_traffic_campaign = any(kw in campaign_name.lower() for kw in traffic_keywords)
+
+                enriched_ads.append({
+                    "id": ad["id"],
+                    "name": ad.get("name", ""),
+                    "campaign_id": campaign_id,
+                    "campaign_name": campaign_name,
+                    "adset_id": adset_id,
+                    "adset_name": adset_names.get(adset_id, "Unknown Ad Set"),
+                    "is_traffic_campaign": is_traffic_campaign,
+                    "days_running": days_running,
+                    "paused_date": paused_date,
+                    "spend_30d": round(spend, 2),
+                    "impressions_30d": impressions,
+                    "clicks_30d": clicks,
+                    "leads_30d": leads,
+                    "ctr_30d": round(ctr, 2),
+                    "cpc_30d": round(cpc, 2),
+                    "cpm_30d": round(cpm, 2),
+                    "cpl_30d": cpl,
+                })
+
+            # Sort by 30d spend desc (most recently active at top)
+            enriched_ads.sort(key=lambda x: x["spend_30d"], reverse=True)
+
+            logger.info(
+                "meta_recently_paused_ads",
+                account_id=account_id,
+                ad_count=len(enriched_ads),
+                date_range=f"{since} to {until}",
+            )
+
+            return {
+                "success": True,
+                "total_paused_ads": len(enriched_ads),
+                "date_range": {"since": since, "until": until},
+                "ads": enriched_ads,
+            }
+
+        except Exception as e:
+            logger.error("meta_recently_paused_ads_error", error=str(e))
+            return {"success": False, "error": str(e)}
+
+    def format_paused_ads_for_context(self, data: Dict[str, Any]) -> str:
+        """
+        Format paused ads with performance context for Jarvis.
+
+        Groups by campaign so Jarvis can reason about what was paused where
+        and explain the performance rationale behind each pause.
+        """
+        if not data.get("success"):
+            return f"Paused ads data unavailable: {data.get('error', 'Unknown error')}"
+
+        ads = data.get("ads", [])
+        total = data.get("total_paused_ads", len(ads))
+        since = data.get("date_range", {}).get("since", "")
+        until = data.get("date_range", {}).get("until", "")
+
+        lines = [
+            "=== RECENTLY PAUSED ADS (effective_status=PAUSED) ===",
+            f"Total paused ads in account: {total}",
+            f"Performance window shown: {since} to {until} (last 30 days)",
+            "Note: 'Paused date' is derived from updated_time — the last time Meta recorded a change on the ad.",
+            "      Ads with $0 spend in the 30d window may have been paused earlier in the period.",
+            "",
+        ]
+
+        if not ads:
+            lines.append("No paused ads found in this account.")
+            return "\n".join(lines)
+
+        # Group by campaign, sort by total 30d spend desc
+        by_campaign: Dict[str, List[dict]] = {}
+        for ad in ads:
+            by_campaign.setdefault(ad["campaign_name"], []).append(ad)
+
+        campaigns_by_spend = sorted(
+            by_campaign.items(),
+            key=lambda kv: sum(a["spend_30d"] for a in kv[1]),
+            reverse=True,
+        )
+
+        for campaign_name, camp_ads in campaigns_by_spend:
+            is_traffic = camp_ads[0].get("is_traffic_campaign", False)
+            camp_spend = sum(a["spend_30d"] for a in camp_ads)
+            camp_leads = sum(a["leads_30d"] for a in camp_ads)
+            camp_cpl = round(camp_spend / camp_leads, 2) if camp_leads > 0 else None
+            cpl_str = f"${camp_cpl:.2f}" if camp_cpl else "no leads"
+
+            camp_label = "🚗 TRAFFIC CAMPAIGN" if is_traffic else "📣 LEAD-GEN CAMPAIGN"
+            summary = f"   {len(camp_ads)} paused ads | 30d spend: ${camp_spend:,.2f}"
+            if not is_traffic:
+                summary += f" | 30d leads: {camp_leads} | 30d CPL: {cpl_str}"
+
+            lines.append(f"\n{camp_label}: {campaign_name}")
+            lines.append(summary)
+
+            for ad in sorted(camp_ads, key=lambda x: x["spend_30d"], reverse=True):
+                dr = f"{ad['days_running']}d old" if ad["days_running"] is not None else "age unknown"
+                paused_str = f" | paused ~{ad['paused_date']}" if ad["paused_date"] else ""
+                spend_str = f"${ad['spend_30d']:,.2f}"
+
+                lines.append(f"   • {ad['name'][:90]}")
+                lines.append(f"     Ad Set: {ad['adset_name'][:70]} | {dr}{paused_str}")
+
+                if is_traffic:
+                    impr = ad["impressions_30d"]
+                    ctr = ad["ctr_30d"]
+                    cpc_str = f"${ad['cpc_30d']:.2f}" if ad["cpc_30d"] > 0 else "$0.00"
+                    lines.append(
+                        f"     30d: spend={spend_str} | impr={impr:,} | CTR={ctr:.2f}% | CPC={cpc_str}"
+                    )
+                else:
+                    leads_str = str(ad["leads_30d"])
+                    cpl_ad_str = f"${ad['cpl_30d']:.2f}" if ad["cpl_30d"] is not None else "no leads"
+                    lines.append(
+                        f"     30d: spend={spend_str} | leads={leads_str} | CPL={cpl_ad_str} | "
+                        f"impr={ad['impressions_30d']:,} | CTR={ad['ctr_30d']:.2f}%"
+                    )
+            lines.append("")
+
+        return "\n".join(lines)
+
     async def get_meta_active_ads_with_performance(
         self,
         account_id: str,
