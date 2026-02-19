@@ -985,7 +985,15 @@ class LiveAPIService:
     def format_ads_for_context(self, data: Dict[str, Any]) -> str:
         """
         Format ad-level data as readable context for Jarvis.
-        Groups by campaign → ad set → individual ads.
+
+        Structure:
+          1. CREATIVE ROLLUP — one row per unique ad name showing totals across
+             ALL campaigns/adsets it lives in, plus how many instances exist.
+             This lets Jarvis immediately see if a creative is duplicated and
+             compare its aggregate performance.
+          2. FULL BREAKDOWN — Campaign → Ad Set → individual ad instances with
+             full metrics, so Jarvis can see exactly where each copy lives and
+             compare performance across placements.
         """
         if not data.get("success"):
             return f"Ad-level data unavailable: {data.get('error', 'Unknown error')}"
@@ -1001,8 +1009,9 @@ class LiveAPIService:
         lines = [
             header,
             f"Date Range: {date_start} to {date_end}",
-            f"Total ads with activity: {len(ads)}",
-            "⚠️  Only ads with spend or impressions in this window are shown.",
+            f"Total ad instances with activity: {len(ads)}",
+            "⚠️  Same ad name appearing in multiple campaigns = separate instances (duplicates).",
+            "    Each instance has independent spend/leads. Totals below aggregate all instances.",
             "",
         ]
 
@@ -1010,40 +1019,124 @@ class LiveAPIService:
             lines.append("No ads matched the search criteria in this date range.")
             return "\n".join(lines)
 
-        # Group by campaign → adset
+        # ── SECTION 1: Creative rollup (aggregate by ad name across all placements) ──
+        by_ad_name: Dict[str, List[dict]] = {}
+        for ad in ads:
+            by_ad_name.setdefault(ad["ad_name"], []).append(ad)
+
+        lines.append("─" * 60)
+        lines.append("SECTION 1 — CREATIVE ROLLUP (all instances combined)")
+        lines.append("─" * 60)
+        lines.append(
+            f"{'Ad Name':<45} {'Instances':>9} {'Spend':>10} {'Leads':>6} {'CPL':>8} {'Impr':>10}"
+        )
+        lines.append("-" * 95)
+
+        # Sort rollup by total spend desc
+        rollup_sorted = sorted(
+            by_ad_name.items(),
+            key=lambda kv: sum(a["spend"] for a in kv[1]),
+            reverse=True,
+        )
+        for ad_name, instances in rollup_sorted:
+            total_spend = sum(a["spend"] for a in instances)
+            total_leads = sum(a["leads"] for a in instances)
+            total_impr = sum(a["impressions"] for a in instances)
+            total_cpl = round(total_spend / total_leads, 2) if total_leads > 0 else None
+            cpl_str = f"${total_cpl:.2f}" if total_cpl else "N/A"
+            instance_count = len(instances)
+            duplicate_flag = " ⚠️ DUPE" if instance_count > 1 else ""
+
+            # Truncate long ad names for table alignment
+            name_display = (ad_name[:42] + "...") if len(ad_name) > 45 else ad_name
+            lines.append(
+                f"{name_display:<45} {instance_count:>9}{duplicate_flag}"
+                f"  ${total_spend:>8,.2f}  {total_leads:>5}  {cpl_str:>8}  {total_impr:>9,}"
+            )
+
+            # Show which campaigns each instance lives in (indented)
+            for inst in sorted(instances, key=lambda x: x["spend"], reverse=True):
+                inst_cpl = f"${inst['cpl']:.2f}" if inst["cpl"] else "N/A"
+                lines.append(
+                    f"    ↳ [{inst['campaign_name']}] › [{inst['adset_name']}]"
+                    f"  spend=${inst['spend']:,.2f}  leads={inst['leads']}  cpl={inst_cpl}"
+                )
+        lines.append("")
+
+        # ── SECTION 2: Full breakdown Campaign → Ad Set → Ads ──
+        lines.append("─" * 60)
+        lines.append("SECTION 2 — FULL BREAKDOWN BY CAMPAIGN & AD SET")
+        lines.append("─" * 60)
+
+        # Group by campaign → adset, sort campaigns by total spend desc
         by_campaign: Dict[str, Dict[str, List[dict]]] = {}
         for ad in ads:
             cname = ad["campaign_name"]
             aname = ad["adset_name"]
             by_campaign.setdefault(cname, {}).setdefault(aname, []).append(ad)
 
-        for campaign_name, adsets in sorted(by_campaign.items()):
+        campaigns_by_spend = sorted(
+            by_campaign.items(),
+            key=lambda kv: sum(
+                ad["spend"] for adsets in kv[1].values() for ad in adsets
+            ),
+            reverse=True,
+        )
+
+        for campaign_name, adsets in campaigns_by_spend:
             is_traffic = list(adsets.values())[0][0].get("is_traffic_campaign", False)
             camp_label = "🚗 TRAFFIC" if is_traffic else "📣 LEAD-GEN"
             camp_spend = sum(ad["spend"] for ads_list in adsets.values() for ad in ads_list)
-            lines.append(f"{camp_label} Campaign: {campaign_name}  |  Window spend: ${camp_spend:,.2f}")
+            camp_leads = sum(ad["leads"] for ads_list in adsets.values() for ad in ads_list)
+            camp_cpl = round(camp_spend / camp_leads, 2) if camp_leads > 0 else None
+            cpl_str = f"${camp_cpl:.2f}" if camp_cpl else "N/A"
 
-            for adset_name, adset_ads in sorted(adsets.items()):
+            lines.append(
+                f"\n{camp_label} Campaign: {campaign_name}"
+                f"\n  Campaign totals — Spend: ${camp_spend:,.2f} | Leads: {camp_leads} | CPL: {cpl_str}"
+            )
+
+            # Sort adsets by spend desc
+            adsets_by_spend = sorted(
+                adsets.items(),
+                key=lambda kv: sum(a["spend"] for a in kv[1]),
+                reverse=True,
+            )
+            for adset_name, adset_ads in adsets_by_spend:
                 adset_spend = sum(a["spend"] for a in adset_ads)
-                lines.append(f"  📂 Ad Set: {adset_name}  |  Spend: ${adset_spend:,.2f}")
+                adset_leads = sum(a["leads"] for a in adset_ads)
+                adset_cpl = round(adset_spend / adset_leads, 2) if adset_leads > 0 else None
+                adset_cpl_str = f"${adset_cpl:.2f}" if adset_cpl else "N/A"
+
+                lines.append(
+                    f"  📂 Ad Set: {adset_name}"
+                    f"  |  Spend: ${adset_spend:,.2f} | Leads: {adset_leads} | CPL: {adset_cpl_str}"
+                )
 
                 for ad in sorted(adset_ads, key=lambda x: x["spend"], reverse=True):
-                    leads_str = (
-                        f"Leads: {ad['leads']} | CPL: ${ad['cpl']:.2f}"
-                        if ad["leads"] > 0
-                        else ("Leads: 0" if not is_traffic else "")
-                    )
-                    metric_str = (
-                        f"Impr: {ad['impressions']:,} | CTR: {ad['ctr']:.2f}% | CPC: ${ad['cpc']:.2f}"
-                        if is_traffic
-                        else f"Impr: {ad['impressions']:,} | Clicks: {ad['clicks']:,} | {leads_str}"
-                    )
+                    # Flag if this ad name appears in other campaigns too
+                    instance_count = len(by_ad_name.get(ad["ad_name"], []))
+                    dupe_note = f"  ← also in {instance_count - 1} other campaign(s)" if instance_count > 1 else ""
+
+                    if is_traffic:
+                        metric_str = (
+                            f"Impr: {ad['impressions']:,} | CTR: {ad['ctr']:.2f}% "
+                            f"| CPC: ${ad['cpc']:.2f} | CPM: ${ad['cpm']:.2f}"
+                        )
+                    else:
+                        leads_str = (
+                            f"Leads: {ad['leads']} | CPL: ${ad['cpl']:.2f}"
+                            if ad["leads"] > 0 else "Leads: 0 | CPL: N/A"
+                        )
+                        metric_str = (
+                            f"Impr: {ad['impressions']:,} | Clicks: {ad['clicks']:,} | {leads_str}"
+                        )
+
                     lines.append(
-                        f"    🎯 {ad['ad_name']}\n"
+                        f"    🎯 {ad['ad_name']}{dupe_note}\n"
                         f"       Spend: ${ad['spend']:,.2f} | {metric_str}"
                     )
                 lines.append("")
-            lines.append("")
 
         return "\n".join(lines)
 
