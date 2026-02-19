@@ -534,6 +534,68 @@ class SlackBot:
         words = re.findall(r"[A-Za-z0-9+]+", query)
         return [w for w in words if len(w) > 4 and w.lower() not in stopwords]
 
+    # ── Loading bar helpers ───────────────────────────────────────────────────
+
+    _BAR_FILL = "█"
+    _BAR_EMPTY = "░"
+    _BAR_WIDTH = 10
+
+    def _render_status(
+        self,
+        steps: List[tuple],   # list of (label, state) where state: "done"|"active"|"pending"
+        date_range: Optional[Any] = None,
+    ) -> str:
+        """
+        Render an animated status block showing each pipeline stage.
+
+        Each step is rendered as a bar segment:
+          ████████░░  75%  ✅ Campaign data  (done)
+          ██░░░░░░░░  20%  ⏳ Ad-level data  (active — animated dots)
+                           ○ Thinking…       (pending)
+        """
+        done_count = sum(1 for _, s in steps if s == "done")
+        total = len(steps)
+        pct = int((done_count / total) * 100) if total else 0
+        filled = int((done_count / total) * self._BAR_WIDTH) if total else 0
+
+        bar = self._BAR_FILL * filled + self._BAR_EMPTY * (self._BAR_WIDTH - filled)
+
+        date_str = ""
+        if date_range:
+            date_str = f"  `{date_range.start_date} → {date_range.end_date}`"
+
+        lines = [f"`{bar}` {pct}%{date_str}", ""]
+
+        for label, state in steps:
+            if state == "done":
+                lines.append(f"✅  {label}")
+            elif state == "active":
+                lines.append(f"⏳  {label}")
+            else:
+                lines.append(f"○  _{label}_")
+
+        return "\n".join(lines)
+
+    async def _update_status(
+        self,
+        client: AsyncWebClient,
+        channel: str,
+        ts: str,
+        steps: List[tuple],
+        date_range: Optional[Any] = None,
+    ) -> None:
+        """Push a status update to the loading message."""
+        try:
+            await client.chat_update(
+                channel=channel,
+                ts=ts,
+                text=self._render_status(steps, date_range),
+            )
+        except Exception:
+            pass  # Never let a status update crash the pipeline
+
+    # ── Main analysis handler ─────────────────────────────────────────────────
+
     async def analyze_and_respond(
         self,
         client: AsyncWebClient,
@@ -546,26 +608,43 @@ class SlackBot:
         """Perform analysis and respond with results."""
         reply_ts = thread_ts or mention_ts
 
-        # Send initial "analyzing" message
+        # Resolve date range up front so the status bar can show it immediately
+        date_range = parse_date_range_from_query(user_query)
+        if date_range is None:
+            date_range = DateRange.this_month()
+            logger.info("no_date_range_in_query_defaulting_to_mtd")
+
+        account_id = get_account_id_from_query(user_query)
+
+        # Decide which extra fetch stages we'll need
+        needs_ad_limit = force_ad_performance or self._is_ad_limit_query(user_query)
+        needs_ad_lookup = (not needs_ad_limit) and self._is_ad_lookup_query(user_query)
+
+        # Build the step list for the status bar
+        base_steps: List[tuple] = [
+            ("Account & campaign data", "active"),
+        ]
+        if needs_ad_limit:
+            base_steps.append(("Active ads inventory", "pending"))
+        if needs_ad_lookup:
+            base_steps.append(("Ad-level creative data", "pending"))
+        base_steps.append(("Thinking…", "pending"))
+
+        # Post the initial loading message
         thinking_msg = await client.chat_postMessage(
             channel=channel,
             thread_ts=reply_ts,
-            text=":hourglass_flowing_sand: Analyzing your request...",
+            text=self._render_status(base_steps, date_range),
         )
+        ts = thinking_msg["ts"]
+
+        def steps_with(updates: dict) -> List[tuple]:
+            """Return updated step list with state overrides by label."""
+            return [(lbl, updates.get(lbl, st)) for lbl, st in base_steps]
 
         try:
-            # Resolve date range — if user didn't specify one, default to MTD so
-            # Jarvis always pulls live data and never uses stale static cache.
-            date_range = parse_date_range_from_query(user_query)
-            if date_range is None:
-                date_range = DateRange.this_month()
-                logger.info("no_date_range_in_query_defaulting_to_mtd")
-
             live_api_context = None
             live_data_success = False
-
-            # Determine which account to query
-            account_id = get_account_id_from_query(user_query)
 
             logger.info(
                 "fetching_live_data",
@@ -573,16 +652,8 @@ class SlackBot:
                 query=user_query[:50]
             )
 
-            # Update thinking message
-            await client.chat_update(
-                channel=channel,
-                ts=thinking_msg["ts"],
-                text=f":hourglass_flowing_sand: Fetching live Meta data for {date_range.start_date} to {date_range.end_date}...",
-            )
-
-            # Fetch live data directly from Meta Graph API
+            # ── Stage 1: Account summary + campaign breakdown ─────────────────
             try:
-                # Account-level summary + campaign breakdown, both scoped to the date window
                 insights_data, campaign_data = await asyncio.gather(
                     self.live_api.get_meta_account_insights(
                         account_id=account_id,
@@ -598,10 +669,8 @@ class SlackBot:
                 if insights_data.get("success"):
                     live_api_context = self.live_api.format_insights_for_context(insights_data)
                     live_data_success = True
-
                     if campaign_data.get("success"):
                         live_api_context += "\n\n" + self.live_api.format_campaigns_for_context(campaign_data)
-
                     logger.info(
                         "live_data_fetched_successfully",
                         account_id=account_id,
@@ -615,8 +684,7 @@ class SlackBot:
                         f"=== DATE RANGE REQUESTED ===\n"
                         f"Period: {date_range.start_date} to {date_range.end_date}\n"
                         f"Account: {account_id}\n"
-                        f"Note: Live data fetch failed ({error_msg}). "
-                        f"Falling back to cached dashboard data — results may not reflect the requested date range.\n"
+                        f"Note: Live data fetch failed ({error_msg}). Falling back to cached data.\n"
                     )
             except Exception as e:
                 logger.warning("live_data_fetch_error", error=str(e))
@@ -626,18 +694,29 @@ class SlackBot:
                     f"Note: Could not fetch live data ({str(e)}). Falling back to cached data.\n"
                 )
 
+            # Mark stage 1 done, activate next stage
+            if needs_ad_limit:
+                await self._update_status(client, channel, ts, steps_with({
+                    "Account & campaign data": "done",
+                    "Active ads inventory": "active",
+                }), date_range)
+            elif needs_ad_lookup:
+                await self._update_status(client, channel, ts, steps_with({
+                    "Account & campaign data": "done",
+                    "Ad-level creative data": "active",
+                }), date_range)
+            else:
+                await self._update_status(client, channel, ts, steps_with({
+                    "Account & campaign data": "done",
+                    "Thinking…": "active",
+                }), date_range)
+
             logger.info("live_data_context_built", has_context=bool(live_api_context), success=live_data_success)
 
-            # Only use stale static JSON as a last resort — when live API completely
-            # failed. If we have live data, pass an empty dict so Claude never sees
-            # phantom old campaign names from the cached files.
             if live_data_success:
                 performance_data = {}
             else:
                 performance_data = self._get_performance_data_from_dashboard()
-
-            if not performance_data and not live_api_context:
-                logger.info("no_dashboard_data", message="Using file uploads only")
 
             # Get thread context
             ctx = self.get_thread_context(channel, thread_ts)
@@ -664,18 +743,15 @@ class SlackBot:
                 filename = file_data.get("filename", "unknown")
 
                 if file_type in ("performance_data", "tabular"):
-                    # Handle CSV/Excel data files
                     columns = file_data.get("columns", [])
                     row_count = file_data.get("row_count", 0)
                     data = file_data.get("data", [])
-
                     additional_context_parts.append(
                         f"=== UPLOADED FILE: '{filename}' ===\n"
                         f"Type: {file_type}\n"
                         f"Columns: {', '.join(columns)}\n"
                         f"Total rows: {row_count}\n"
                     )
-                    # Include ALL the data if it's reasonable size, otherwise sample
                     if data:
                         if len(data) <= 50:
                             additional_context_parts.append(f"Complete data:\n{data}")
@@ -684,7 +760,6 @@ class SlackBot:
                             additional_context_parts.append(f"Last 10 rows:\n{data[-10:]}")
 
                 elif file_type == "spreadsheet":
-                    # Handle multi-sheet Excel files
                     sheets = file_data.get("sheets", {})
                     sheet_names = file_data.get("sheet_names", [])
                     additional_context_parts.append(
@@ -699,7 +774,6 @@ class SlackBot:
                             )
 
                 elif file_type == "document":
-                    # Handle PDFs, Word docs, text files
                     text_content = file_data.get("text_content", "")
                     additional_context_parts.append(
                         f"=== UPLOADED DOCUMENT: '{filename}' ===\n"
@@ -708,7 +782,6 @@ class SlackBot:
                     )
 
                 elif file_type == "json":
-                    # Handle JSON files
                     json_data = file_data.get("data", {})
                     additional_context_parts.append(
                         f"=== UPLOADED JSON: '{filename}' ===\n"
@@ -716,7 +789,6 @@ class SlackBot:
                     )
 
                 elif file_type == "image":
-                    # For images, just note that we have it
                     additional_context_parts.append(
                         f"=== UPLOADED IMAGE: '{filename}' ===\n"
                         f"Format: {file_data.get('format', 'unknown')}\n"
@@ -725,20 +797,14 @@ class SlackBot:
                     )
 
                 else:
-                    # Unknown type - include what we can
                     additional_context_parts.append(
                         f"=== UPLOADED FILE: '{filename}' (type: {file_type}) ===\n"
                         f"Data: {str(file_data)[:2000]}"
                     )
 
-            # Fetch active ads performance data if this is an ad-limit/pause query
-            if force_ad_performance or self._is_ad_limit_query(user_query):
+            # ── Stage 2a: Active ads inventory (pause/limit queries) ──────────
+            if needs_ad_limit:
                 try:
-                    await client.chat_update(
-                        channel=channel,
-                        ts=thinking_msg["ts"],
-                        text=":hourglass_flowing_sand: Fetching active ad performance data...",
-                    )
                     ad_perf_data = await self.live_api.get_meta_active_ads_with_performance(account_id)
                     if ad_perf_data.get("success"):
                         ad_perf_context = self.live_api.format_active_ads_for_jarvis(ad_perf_data)
@@ -747,15 +813,15 @@ class SlackBot:
                 except Exception as e:
                     logger.warning("ad_performance_fetch_failed", error=str(e))
 
-            # Fetch ad-level data if user is asking about specific ads/creatives
-            elif self._is_ad_lookup_query(user_query):
+                await self._update_status(client, channel, ts, steps_with({
+                    "Account & campaign data": "done",
+                    "Active ads inventory": "done",
+                    "Thinking…": "active",
+                }), date_range)
+
+            # ── Stage 2b: Ad-level creative lookup ────────────────────────────
+            elif needs_ad_lookup:
                 try:
-                    await client.chat_update(
-                        channel=channel,
-                        ts=thinking_msg["ts"],
-                        text=":hourglass_flowing_sand: Looking up individual ad performance data...",
-                    )
-                    # Extract name fragments from the query to filter results
                     search_terms = self._extract_search_terms(user_query)
                     logger.info("ad_lookup_triggered", search_terms=search_terms)
 
@@ -777,32 +843,33 @@ class SlackBot:
                 except Exception as e:
                     logger.warning("ad_lookup_fetch_failed", error=str(e))
 
-            # Add live API data to context if we fetched it
+                await self._update_status(client, channel, ts, steps_with({
+                    "Account & campaign data": "done",
+                    "Ad-level creative data": "done",
+                    "Thinking…": "active",
+                }), date_range)
+
+            # Add live API data to context
             if live_api_context:
                 additional_context_parts.insert(0, live_api_context)
 
             additional_context = "\n\n".join(additional_context_parts) if additional_context_parts else None
 
-            # Get AI analysis
+            # ── Stage 3: AI analysis ──────────────────────────────────────────
             analysis = await self.analyst.analyze_performance(
                 performance_data=performance_data,
                 user_query=user_query,
                 additional_context=additional_context,
             )
 
-            # Store analysis in context
             ctx["last_analysis"] = analysis
-
-            # Parse budget table for CSV generation
             budget_table = parse_budget_table_from_response(analysis)
-
-            # Clean response for Slack
             slack_response = clean_response_for_slack(analysis)
 
-            # Update the thinking message with the analysis
+            # Replace the loading bar with the final answer
             await client.chat_update(
                 channel=channel,
-                ts=thinking_msg["ts"],
+                ts=ts,
                 text=slack_response,
             )
 
@@ -828,7 +895,7 @@ class SlackBot:
             logger.error("analysis_error", error=str(e), error_type=type(e).__name__)
             await client.chat_update(
                 channel=channel,
-                ts=thinking_msg["ts"],
+                ts=ts,
                 text=f":x: Sorry, I encountered an error while analyzing: {str(e)}",
             )
 
