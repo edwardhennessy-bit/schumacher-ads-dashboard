@@ -538,7 +538,9 @@ class SlackBot:
         "which ads were paused", "ads i paused", "show paused", "list paused",
         "recently paused", "just paused", "ads paused", "paused creatives",
         "change history", "what changed", "paused today", "paused this week",
-        "paused yesterday",
+        "paused yesterday", "i just paused", "i paused", "been paused",
+        "what's been paused", "whats been paused", "what has been paused",
+        "what i paused", "list of what", "list of paused",
     ]
 
     def _is_paused_ads_query(self, query: str) -> bool:

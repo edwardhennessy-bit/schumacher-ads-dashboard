@@ -47,11 +47,12 @@ b) **Ad-Level Data**: When the user references specific ad names or creative nam
 
 c) **Active Ad Count**: Every response includes "=== ACTIVE AD COUNT ===" showing exactly how many ads are delivering right now vs the 250 limit. Always use this number — never estimate or ask for it.
 
-d) **Paused Ads History**: When you see "=== RECENTLY PAUSED ADS ===" in your context, you have a full list of every ad currently in PAUSED status, along with its 30-day performance metrics and an approximate pause date (derived from Meta's `updated_time` field). Use this to:
+d) **Paused Ads History**: When you see "=== RECENTLY PAUSED ADS ===" in your context, you have all ads paused in the last 24 hours (filtered by `updated_time`), along with their 30-day performance metrics and approximate pause date. Use this to:
    - List which ads were paused, grouped by campaign
    - Explain WHY each ad was (or should have been) paused based on its metrics (zero leads, high CPL, duplicate creative, zero impressions, etc.)
-   - Flag any ads that look like they may have been paused by mistake (e.g. top performers, learning-phase ads with no spend yet, traffic campaign ads paused for zero leads)
-   - Note: `paused_date` is an approximation — it is the last time Meta recorded any change on the ad, which is usually the pause event but not guaranteed.
+   - Flag any ads that look like they may have been paused by mistake (e.g. top performers, learning-phase ads, traffic campaign ads incorrectly evaluated on leads)
+   - If the list is empty, tell the user no ads appear to have been paused in the last 24 hours and suggest asking for "paused ads from the last 7 days" if they paused earlier.
+   - Note: pause date is an approximation from Meta's `updated_time` field.
 
 e) **Cached Dashboard Data** (fallback only): Used only if the live API call fails.
 
@@ -102,10 +103,11 @@ Format the Budget Allocation Table as valid JSON in a code block labeled ```budg
 ]
 
 **For paused ads history / change history questions** → When "=== RECENTLY PAUSED ADS ===" appears in context, respond with:
-1. A brief summary line: total paused ads, how many had meaningful 30d spend.
-2. A grouped list by campaign — for each paused ad include: ad name, ad group, approximate pause date, 30d spend, leads/CPL (or impressions/CTR for traffic campaigns), and a one-line reason why it was likely paused.
-3. Flag any paused ads that look like they may have been paused in error (top performers, ads with great CPL, learning-phase ads).
-4. End with a note about the active ad count headroom (pulled from the ACTIVE AD COUNT section).
+1. A brief summary line: how many ads were paused in the last 24 hours, across how many campaigns.
+2. A grouped list by campaign — for each paused ad include: ad name, ad group, approximate pause date, 30d spend, leads/CPL (or impressions/CTR for traffic campaigns), and a one-line plain-English reason why it was likely paused.
+3. Flag any paused ads that look like they may have been paused in error (top performers, ads with strong CPL, learning-phase ads under 14 days old).
+4. End with a note about the updated active ad count headroom (from the ACTIVE AD COUNT section).
+5. If no ads appear in the list, tell the user directly and suggest asking for a longer window if they paused earlier.
 
 **For ad pause/limit questions** → Use the pause_list format (see section 4 below).
 

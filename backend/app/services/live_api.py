@@ -1143,31 +1143,27 @@ class LiveAPIService:
     async def get_meta_recently_paused_ads(
         self,
         account_id: str,
-        days_back: int = 30,
+        days_back: int = 1,
+        max_ads: int = 150,
     ) -> Dict[str, Any]:
         """
-        Fetch all PAUSED ads with their recent performance metrics.
+        Fetch RECENTLY paused ads with their performance metrics.
 
-        Uses effective_status=PAUSED to pull every ad that is currently paused,
-        enriched with 30-day performance data so Jarvis can explain WHY each ad
-        was (or should have been) paused based on its metrics.
+        Fetches ads with effective_status=PAUSED, then filters client-side to
+        only those whose updated_time (pause-date proxy) falls within the last
+        `days_back` days. Default is 1 day (last 24 hours) so we only surface
+        ads paused in the most recent session — not the entire account history.
 
-        Also pulls `updated_time` on each ad, which reflects when Meta last
-        recorded a status change — a proxy for "when was this paused."
+        Capped at `max_ads` total (sorted by 30d spend desc) to stay within
+        the 200k token limit for Claude.
 
         Args:
             account_id: Meta ad account ID.
-            days_back: Performance window in days (default 30).
-
-        Returns:
-            Dictionary with paused ads list, each enriched with:
-              - campaign_name, adset_name
-              - days_running, paused_date (from updated_time)
-              - spend, impressions, clicks, leads, CPL (last 30d)
-              - is_traffic_campaign flag
+            days_back: How far back to look for paused ads (default 1 day).
+            max_ads: Hard cap on ads passed to the formatter (default 150).
         """
         import json as _json
-        from datetime import date, timedelta
+        from datetime import date, timedelta, timezone
 
         if not self.meta_token:
             return {"success": False, "error": "Meta API token not configured"}
@@ -1175,6 +1171,7 @@ class LiveAPIService:
         today = date.today()
         since = (today - timedelta(days=days_back)).isoformat()
         until = today.isoformat()
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days_back)
 
         paused_filter = _json.dumps([{
             "field": "effective_status",
@@ -1195,8 +1192,10 @@ class LiveAPIService:
 
         try:
             async with httpx.AsyncClient(timeout=90.0) as client:
-                # Fetch all PAUSED ads with embedded performance insights
-                ads_raw = await paginate(client, f"{META_API_BASE}/{account_id}/ads", {
+                # Only fetch one page (500 ads max) sorted by updated_time desc
+                # so the most recently paused ads come first — no need to paginate
+                # through thousands of old paused ads.
+                resp = await client.get(f"{META_API_BASE}/{account_id}/ads", params={
                     "access_token": self.meta_token,
                     "fields": (
                         "id,name,effective_status,adset_id,campaign_id,"
@@ -1205,8 +1204,11 @@ class LiveAPIService:
                         "{spend,impressions,clicks,actions,ctr,cpc,cpm}"
                     ),
                     "filtering": paused_filter,
+                    "sort": "updated_time_descending",
                     "limit": 500,
                 })
+                resp.raise_for_status()
+                ads_raw = resp.json().get("data", [])
 
                 # Fetch campaign and adset names (no status filter — include all)
                 campaigns_raw, adsets_raw = await asyncio.gather(
@@ -1226,7 +1228,24 @@ class LiveAPIService:
             adset_names = {a["id"]: a["name"] for a in adsets_raw}
 
             enriched_ads = []
+            skipped_old = 0
             for ad in ads_raw:
+                # Parse updated_time and skip ads not updated in the window
+                updated_raw = ad.get("updated_time", "")
+                updated_dt = None
+                paused_date = None
+                if updated_raw:
+                    try:
+                        updated_dt = datetime.fromisoformat(updated_raw.replace("+0000", "+00:00"))
+                        paused_date = updated_dt.strftime("%Y-%m-%d")
+                    except Exception:
+                        pass
+
+                # Filter: only include ads updated within the window
+                if updated_dt and updated_dt < cutoff_dt:
+                    skipped_old += 1
+                    continue
+
                 insights_rows = ad.get("insights", {}).get("data", [])
                 row = insights_rows[0] if insights_rows else {}
 
@@ -1250,16 +1269,6 @@ class LiveAPIService:
                     try:
                         created_dt = datetime.fromisoformat(created_raw.replace("+0000", "+00:00"))
                         days_running = (datetime.now(created_dt.tzinfo) - created_dt).days
-                    except Exception:
-                        pass
-
-                # Paused date — updated_time is a proxy for last status change
-                paused_date = None
-                updated_raw = ad.get("updated_time", "")
-                if updated_raw:
-                    try:
-                        updated_dt = datetime.fromisoformat(updated_raw.replace("+0000", "+00:00"))
-                        paused_date = updated_dt.strftime("%Y-%m-%d")
                     except Exception:
                         pass
 
@@ -1290,19 +1299,27 @@ class LiveAPIService:
                     "cpl_30d": cpl,
                 })
 
-            # Sort by 30d spend desc (most recently active at top)
+            # Sort by 30d spend desc, then hard-cap to max_ads
             enriched_ads.sort(key=lambda x: x["spend_30d"], reverse=True)
+            total_recent = len(enriched_ads)
+            truncated = total_recent > max_ads
+            enriched_ads = enriched_ads[:max_ads]
 
             logger.info(
                 "meta_recently_paused_ads",
                 account_id=account_id,
-                ad_count=len(enriched_ads),
+                recent_ad_count=total_recent,
+                skipped_old=skipped_old,
+                returned=len(enriched_ads),
+                truncated=truncated,
                 date_range=f"{since} to {until}",
             )
 
             return {
                 "success": True,
-                "total_paused_ads": len(enriched_ads),
+                "total_paused_ads": total_recent,
+                "truncated": truncated,
+                "max_ads": max_ads,
                 "date_range": {"since": since, "until": until},
                 "ads": enriched_ads,
             }
@@ -1323,20 +1340,22 @@ class LiveAPIService:
 
         ads = data.get("ads", [])
         total = data.get("total_paused_ads", len(ads))
+        truncated = data.get("truncated", False)
+        max_ads = data.get("max_ads", 150)
         since = data.get("date_range", {}).get("since", "")
         until = data.get("date_range", {}).get("until", "")
 
         lines = [
-            "=== RECENTLY PAUSED ADS (effective_status=PAUSED) ===",
-            f"Total paused ads in account: {total}",
+            "=== RECENTLY PAUSED ADS (paused in the last 24 hours) ===",
+            f"Ads paused in the last 24 hours: {total}" + (f" (showing top {max_ads} by 30d spend)" if truncated else ""),
             f"Performance window shown: {since} to {until} (last 30 days)",
-            "Note: 'Paused date' is derived from updated_time — the last time Meta recorded a change on the ad.",
-            "      Ads with $0 spend in the 30d window may have been paused earlier in the period.",
+            "Note: Pause date is derived from updated_time — the last time Meta recorded any change on the ad.",
             "",
         ]
 
         if not ads:
-            lines.append("No paused ads found in this account.")
+            lines.append("No ads appear to have been paused in the last 24 hours.")
+            lines.append("If you paused ads more than 24 hours ago, ask Jarvis to 'show paused ads from the last 7 days'.")
             return "\n".join(lines)
 
         # Group by campaign, sort by total 30d spend desc
