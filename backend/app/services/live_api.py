@@ -156,9 +156,17 @@ class DateRange:
 def parse_date_range_from_query(query: str) -> Optional[DateRange]:
     """
     Parse natural language date range from user query.
+    Returns None only if absolutely no date intent is detected — callers should
+    default to MTD in that case so Jarvis always uses live data, never stale cache.
     """
     import re
     query_lower = query.lower()
+
+    # "today" / "right now" / "live"
+    if any(w in query_lower for w in ["today", "right now", "live right now"]):
+        from datetime import date
+        today = date.today().isoformat()
+        return DateRange(start_date=today, end_date=today)
 
     # Check for specific patterns
     if "last 7 days" in query_lower or "past 7 days" in query_lower or "past week" in query_lower:
@@ -332,12 +340,17 @@ class LiveAPIService:
         date_range: DateRange
     ) -> Dict[str, Any]:
         """
-        Fetch campaign-level performance data.
+        Fetch campaign-level performance data for a specific date range.
+
+        Only returns campaigns that had spend or impressions in the requested
+        window — campaigns with zero activity are excluded so Jarvis never
+        sees stale campaign names from prior periods.
         """
         if not self.meta_token:
             return {"error": "Meta API token not configured"}
 
-        fields = [
+        # Insights fields — actual performance for the date window
+        insight_fields = [
             "campaign_id",
             "campaign_name",
             "spend",
@@ -350,21 +363,66 @@ class LiveAPIService:
             "actions",
         ]
 
-        params = {
-            "access_token": self.meta_token,
-            "fields": ",".join(fields),
-            "time_range": f'{{"since":"{date_range.start_date}","until":"{date_range.end_date}"}}',
-            "level": "campaign",
-            "limit": 100
-        }
+        # Also pull campaign-level metadata (status, budget) separately
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            try:
+                # 1. Insights for the requested date range
+                insights_resp = await client.get(
+                    f"{META_API_BASE}/{account_id}/insights",
+                    params={
+                        "access_token": self.meta_token,
+                        "fields": ",".join(insight_fields),
+                        "time_range": f'{{"since":"{date_range.start_date}","until":"{date_range.end_date}"}}',
+                        "level": "campaign",
+                        "limit": 200,
+                    }
+                )
+                insights_resp.raise_for_status()
+                insights_data = insights_resp.json()
+                campaigns_with_spend = insights_data.get("data", [])
 
-        url = f"{META_API_BASE}/{account_id}/insights"
+                # 2. Campaign metadata (name, status, daily budget) — scoped to ACTIVE campaigns
+                import json as _json
+                meta_resp = await client.get(
+                    f"{META_API_BASE}/{account_id}/campaigns",
+                    params={
+                        "access_token": self.meta_token,
+                        "fields": "id,name,status,effective_status,daily_budget,lifetime_budget,objective",
+                        "filtering": _json.dumps([{
+                            "field": "effective_status",
+                            "operator": "IN",
+                            "value": ["ACTIVE", "PAUSED"],
+                        }]),
+                        "limit": 200,
+                    }
+                )
+                meta_resp.raise_for_status()
+                campaign_meta = {
+                    c["id"]: c for c in meta_resp.json().get("data", [])
+                }
 
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-                data = response.json()
+                # Merge metadata into insights rows; filter out zero-spend rows
+                enriched = []
+                for row in campaigns_with_spend:
+                    spend = float(row.get("spend", 0))
+                    impressions = int(row.get("impressions", 0))
+                    # Skip campaigns with zero activity in this window
+                    if spend == 0 and impressions == 0:
+                        continue
+
+                    cid = row.get("campaign_id", "")
+                    meta = campaign_meta.get(cid, {})
+                    daily_budget = meta.get("daily_budget")
+                    lifetime_budget = meta.get("lifetime_budget")
+                    row["status"] = meta.get("effective_status", "UNKNOWN")
+                    row["objective"] = meta.get("objective", "")
+                    row["daily_budget"] = (
+                        f"${float(daily_budget)/100:,.2f}" if daily_budget else None
+                    )
+                    row["lifetime_budget"] = (
+                        f"${float(lifetime_budget)/100:,.2f}" if lifetime_budget else None
+                    )
+                    enriched.append(row)
 
                 return {
                     "success": True,
@@ -373,12 +431,12 @@ class LiveAPIService:
                         "start": date_range.start_date,
                         "end": date_range.end_date
                     },
-                    "campaigns": data.get("data", [])
+                    "campaigns": enriched,
                 }
 
-        except Exception as e:
-            logger.error("meta_campaigns_error", error=str(e))
-            return {"success": False, "error": str(e)}
+            except Exception as e:
+                logger.error("meta_campaigns_error", error=str(e))
+                return {"success": False, "error": str(e)}
 
     async def get_meta_active_ads_count(
         self,
@@ -722,32 +780,50 @@ class LiveAPIService:
     def format_campaigns_for_context(self, campaign_data: Dict[str, Any]) -> str:
         """
         Format campaign data as readable context for the AI.
+
+        IMPORTANT: Only campaigns that had spend or impressions in the requested
+        date window are included. Zero-activity campaigns are filtered out at the
+        API layer so Jarvis never sees stale campaign names from past periods.
         """
         if not campaign_data.get("success"):
             return f"API Error: {campaign_data.get('error', 'Unknown error')}"
 
+        date_start = campaign_data["date_range"]["start"]
+        date_end = campaign_data["date_range"]["end"]
+
         lines = [
             "=== LIVE CAMPAIGN DATA ===",
             f"Account: {campaign_data.get('account_id')}",
-            f"Date Range: {campaign_data['date_range']['start']} to {campaign_data['date_range']['end']}",
+            f"Date Range: {date_start} to {date_end}",
+            "⚠️  Only campaigns with spend or impressions in this exact window are shown.",
+            "    Campaigns not listed had zero activity in this period.",
             ""
         ]
 
         campaigns = campaign_data.get("campaigns", [])
         if not campaigns:
-            lines.append("No campaign data available for this date range.")
+            lines.append("No campaigns had spend or impressions in this date range.")
             return "\n".join(lines)
 
-        lines.append(f"### Campaigns ({len(campaigns)} total)")
+        # Sort by spend descending
+        campaigns_sorted = sorted(
+            campaigns, key=lambda c: float(c.get("spend", 0)), reverse=True
+        )
+
+        lines.append(f"### Campaigns with activity in window ({len(campaigns_sorted)} total)")
         lines.append("")
 
-        for camp in campaigns:
+        for camp in campaigns_sorted:
             name = camp.get("campaign_name", "Unknown")
             spend = float(camp.get("spend", 0))
             impressions = int(camp.get("impressions", 0))
             clicks = int(camp.get("clicks", 0))
             ctr = float(camp.get("ctr", 0))
             cpc = float(camp.get("cpc", 0))
+            status = camp.get("status", "")
+            daily_budget = camp.get("daily_budget")
+            lifetime_budget = camp.get("lifetime_budget")
+            objective = camp.get("objective", "")
 
             # Extract leads
             leads = 0
@@ -758,15 +834,18 @@ class LiveAPIService:
 
             cpl = spend / leads if leads > 0 else 0
 
+            budget_str = ""
+            if daily_budget:
+                budget_str = f" | Daily budget: {daily_budget}"
+            elif lifetime_budget:
+                budget_str = f" | Lifetime budget: {lifetime_budget}"
+
             lines.extend([
                 f"**{name}**",
-                f"  - Spend: ${spend:,.2f}",
-                f"  - Impressions: {impressions:,}",
-                f"  - Clicks: {clicks:,}",
-                f"  - CTR: {ctr:.2f}%",
-                f"  - CPC: ${cpc:.2f}",
-                f"  - Leads: {leads}",
-                f"  - CPL: ${cpl:.2f}",
+                f"  - Status: {status}{' | Objective: ' + objective if objective else ''}",
+                f"  - Spend ({date_start}–{date_end}): ${spend:,.2f}{budget_str}",
+                f"  - Impressions: {impressions:,} | Clicks: {clicks:,} | CTR: {ctr:.2f}% | CPC: ${cpc:.2f}",
+                f"  - Leads: {leads}" + (f" | CPL: ${cpl:.2f}" if leads > 0 else " | CPL: N/A"),
                 ""
             ])
 

@@ -6,6 +6,7 @@ AI-powered paid media analysis via Slack.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any, Dict, Optional
 
@@ -510,88 +511,87 @@ class SlackBot:
         )
 
         try:
-            # Check if user is requesting a specific date range
+            # Resolve date range — if user didn't specify one, default to MTD so
+            # Jarvis always pulls live data and never uses stale static cache.
             date_range = parse_date_range_from_query(user_query)
+            if date_range is None:
+                date_range = DateRange.this_month()
+                logger.info("no_date_range_in_query_defaulting_to_mtd")
+
             live_api_context = None
+            live_data_success = False
 
-            if date_range:
-                # User requested specific date range - fetch live data via Meta Graph API
-                logger.info(
-                    "fetching_live_data",
-                    date_range=f"{date_range.start_date} to {date_range.end_date}",
-                    query=user_query[:50]
-                )
+            # Determine which account to query
+            account_id = get_account_id_from_query(user_query)
 
-                # Determine which account to query
-                account_id = get_account_id_from_query(user_query)
+            logger.info(
+                "fetching_live_data",
+                date_range=f"{date_range.start_date} to {date_range.end_date}",
+                query=user_query[:50]
+            )
 
-                # Update thinking message
-                await client.chat_update(
-                    channel=channel,
-                    ts=thinking_msg["ts"],
-                    text=f":hourglass_flowing_sand: Fetching live Meta data for {date_range.start_date} to {date_range.end_date}...",
-                )
+            # Update thinking message
+            await client.chat_update(
+                channel=channel,
+                ts=thinking_msg["ts"],
+                text=f":hourglass_flowing_sand: Fetching live Meta data for {date_range.start_date} to {date_range.end_date}...",
+            )
 
-                # Fetch live data directly from Meta Graph API
-                try:
-                    # First get account-level insights
-                    insights_data = await self.live_api.get_meta_account_insights(
+            # Fetch live data directly from Meta Graph API
+            try:
+                # Account-level summary + campaign breakdown, both scoped to the date window
+                insights_data, campaign_data = await asyncio.gather(
+                    self.live_api.get_meta_account_insights(
                         account_id=account_id,
                         date_range=date_range,
                         level="account"
+                    ),
+                    self.live_api.get_meta_campaigns(
+                        account_id=account_id,
+                        date_range=date_range
+                    ),
+                )
+
+                if insights_data.get("success"):
+                    live_api_context = self.live_api.format_insights_for_context(insights_data)
+                    live_data_success = True
+
+                    if campaign_data.get("success"):
+                        live_api_context += "\n\n" + self.live_api.format_campaigns_for_context(campaign_data)
+
+                    logger.info(
+                        "live_data_fetched_successfully",
+                        account_id=account_id,
+                        date_range=f"{date_range.start_date} to {date_range.end_date}",
+                        campaign_count=len(campaign_data.get("campaigns", [])),
                     )
-
-                    if insights_data.get("success"):
-                        live_api_context = self.live_api.format_insights_for_context(insights_data)
-
-                        # Also get campaign-level data for detailed analysis
-                        campaign_data = await self.live_api.get_meta_campaigns(
-                            account_id=account_id,
-                            date_range=date_range
-                        )
-                        if campaign_data.get("success"):
-                            live_api_context += "\n\n" + self.live_api.format_campaigns_for_context(campaign_data)
-
-                        logger.info(
-                            "live_data_fetched_successfully",
-                            account_id=account_id,
-                            date_range=f"{date_range.start_date} to {date_range.end_date}"
-                        )
-                    else:
-                        # API call failed - note this in context
-                        error_msg = insights_data.get("error", "Unknown error")
-                        logger.warning("live_data_fetch_failed", error=error_msg)
-
-                        # Provide more context about the configuration issue
-                        if "token" in error_msg.lower() or "configured" in error_msg.lower():
-                            live_api_context = (
-                                f"=== DATE RANGE REQUESTED ===\n"
-                                f"Period: {date_range.start_date} to {date_range.end_date}\n"
-                                f"Account: {account_id}\n"
-                                f"Note: Meta API access token needs to be configured. "
-                                f"Please set META_ACCESS_TOKEN in the .env file. "
-                                f"Get a token from: https://developers.facebook.com/tools/explorer/\n"
-                                f"Analyzing with cached dashboard data instead.\n"
-                            )
-                        else:
-                            live_api_context = (
-                                f"=== DATE RANGE REQUESTED ===\n"
-                                f"Period: {date_range.start_date} to {date_range.end_date}\n"
-                                f"Account: {account_id}\n"
-                                f"Note: Live data fetch failed ({error_msg}). Analyzing with cached dashboard data.\n"
-                            )
-                except Exception as e:
-                    logger.warning("live_data_fetch_error", error=str(e))
+                else:
+                    error_msg = insights_data.get("error", "Unknown error")
+                    logger.warning("live_data_fetch_failed", error=error_msg)
                     live_api_context = (
                         f"=== DATE RANGE REQUESTED ===\n"
                         f"Period: {date_range.start_date} to {date_range.end_date}\n"
-                        f"Note: Could not fetch live data ({str(e)}). Using available dashboard data.\n"
+                        f"Account: {account_id}\n"
+                        f"Note: Live data fetch failed ({error_msg}). "
+                        f"Falling back to cached dashboard data — results may not reflect the requested date range.\n"
                     )
+            except Exception as e:
+                logger.warning("live_data_fetch_error", error=str(e))
+                live_api_context = (
+                    f"=== DATE RANGE REQUESTED ===\n"
+                    f"Period: {date_range.start_date} to {date_range.end_date}\n"
+                    f"Note: Could not fetch live data ({str(e)}). Falling back to cached data.\n"
+                )
 
-                logger.info("live_data_context_built", has_context=bool(live_api_context))
+            logger.info("live_data_context_built", has_context=bool(live_api_context), success=live_data_success)
 
-            # Fetch performance data from the integrated dashboard service
-            performance_data = self._get_performance_data_from_dashboard()
+            # Only use stale static JSON as a last resort — when live API completely
+            # failed. If we have live data, pass an empty dict so Claude never sees
+            # phantom old campaign names from the cached files.
+            if live_data_success:
+                performance_data = {}
+            else:
+                performance_data = self._get_performance_data_from_dashboard()
 
             if not performance_data and not live_api_context:
                 logger.info("no_dashboard_data", message="Using file uploads only")
