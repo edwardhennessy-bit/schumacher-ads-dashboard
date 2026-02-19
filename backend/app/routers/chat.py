@@ -351,12 +351,26 @@ async def send_message(chat_message: ChatMessage):
             conversation_history=conversation_history,
         )
 
-        # Save this exchange to per-session history (clean Q&A only, not data dumps)
-        updated_history = list(conversation_history)
-        updated_history.append({"role": "user", "content": user_message})
-        updated_history.append({"role": "assistant", "content": response})
-        # Cap at 20 messages (10 turns)
-        _session_contexts[session_id] = updated_history[-20:]
+        # Save this exchange to per-session history (clean Q&A only, not data dumps).
+        # IMPORTANT: Do NOT save turns that contained ad-level context (paused ads,
+        # active ads inventory, ad lookups).  Those responses cite live counts that
+        # become stale immediately and will poison Claude's next answer if replayed
+        # as prior-assistant turns (e.g. "you paused 145 ads" hallucination).
+        has_ad_context = needs_paused_ads or needs_ad_lookup or needs_ad_limit
+        if not has_ad_context:
+            updated_history = list(conversation_history)
+            updated_history.append({"role": "user", "content": user_message})
+            updated_history.append({"role": "assistant", "content": response})
+            # Cap at 20 messages (10 turns)
+            _session_contexts[session_id] = updated_history[-20:]
+        else:
+            logger.info(
+                "skipping_history_save_for_data_turn",
+                session_id=session_id,
+                needs_paused_ads=needs_paused_ads,
+                needs_ad_lookup=needs_ad_lookup,
+                needs_ad_limit=needs_ad_limit,
+            )
 
         logger.info("chat_response_sent", session_id=session_id, response_length=len(response))
 
@@ -377,6 +391,19 @@ async def clear_session(session_id: str = "default"):
     if session_id in _session_contexts:
         del _session_contexts[session_id]
     return {"status": "cleared", "session_id": session_id}
+
+
+@router.post("/clear/all")
+async def clear_all_sessions():
+    """Clear conversation history for ALL active sessions.
+
+    Use this when stale data from a previous broken run may be poisoning
+    Claude's context across multiple sessions.
+    """
+    count = len(_session_contexts)
+    _session_contexts.clear()
+    logger.info("all_sessions_cleared", session_count=count)
+    return {"status": "cleared", "sessions_cleared": count}
 
 
 @router.get("/status")
