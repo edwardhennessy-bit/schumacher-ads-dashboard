@@ -1227,22 +1227,29 @@ class LiveAPIService:
             campaign_names = {c["id"]: c["name"] for c in campaigns_raw}
             adset_names = {a["id"]: a["name"] for a in adsets_raw}
 
+            import re as _re
+
+            def _parse_meta_datetime(raw: str) -> Optional[datetime]:
+                """Parse Meta's datetime strings which may use ±HHMM or ±HH:MM offsets."""
+                if not raw:
+                    return None
+                try:
+                    # Normalise ±HHMM → ±HH:MM so fromisoformat() accepts it
+                    normalised = _re.sub(r'([+-])(\d{2})(\d{2})$', r'\1\2:\3', raw)
+                    return datetime.fromisoformat(normalised)
+                except Exception:
+                    return None
+
             enriched_ads = []
             skipped_old = 0
             for ad in ads_raw:
                 # Parse updated_time and skip ads not updated in the window
                 updated_raw = ad.get("updated_time", "")
-                updated_dt = None
-                paused_date = None
-                if updated_raw:
-                    try:
-                        updated_dt = datetime.fromisoformat(updated_raw.replace("+0000", "+00:00"))
-                        paused_date = updated_dt.strftime("%Y-%m-%d")
-                    except Exception:
-                        pass
+                updated_dt = _parse_meta_datetime(updated_raw)
+                paused_date = updated_dt.strftime("%Y-%m-%d") if updated_dt else None
 
                 # Filter: only include ads updated within the window
-                if updated_dt and updated_dt < cutoff_dt:
+                if updated_dt and updated_dt.astimezone(timezone.utc) < cutoff_dt:
                     skipped_old += 1
                     continue
 
@@ -1263,14 +1270,10 @@ class LiveAPIService:
                 cpl = round(spend / leads, 2) if leads > 0 else None
 
                 # Days running (created → today)
-                created_raw = ad.get("created_time", "")
+                created_dt = _parse_meta_datetime(ad.get("created_time", ""))
                 days_running = None
-                if created_raw:
-                    try:
-                        created_dt = datetime.fromisoformat(created_raw.replace("+0000", "+00:00"))
-                        days_running = (datetime.now(created_dt.tzinfo) - created_dt).days
-                    except Exception:
-                        pass
+                if created_dt:
+                    days_running = (datetime.now(created_dt.tzinfo) - created_dt).days
 
                 campaign_id = ad.get("campaign_id", "")
                 adset_id = ad.get("adset_id", "")
