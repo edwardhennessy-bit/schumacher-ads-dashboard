@@ -851,6 +851,202 @@ class LiveAPIService:
 
         return "\n".join(lines)
 
+    async def get_meta_ads_by_date_range(
+        self,
+        account_id: str,
+        date_range: DateRange,
+        search_terms: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fetch ad-level performance data for a specific date range.
+
+        Pulls every ad that had spend or impressions in the window, enriched
+        with campaign name and ad set name. Optionally filters to ads whose
+        name contains any of the search_terms (case-insensitive) so Jarvis
+        can look up specific creatives by name fragment.
+
+        Args:
+            account_id: Meta ad account ID.
+            date_range: Date window to pull metrics for.
+            search_terms: Optional list of name fragments to filter ads by.
+                          If None/empty, returns ALL ads with activity.
+        """
+        if not self.meta_token:
+            return {"success": False, "error": "Meta API token not configured"}
+
+        import json as _json
+
+        since = date_range.start_date
+        until = date_range.end_date
+
+        async def paginate(client: httpx.AsyncClient, url: str, params: dict) -> List[dict]:
+            results = []
+            while url:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                results.extend(data.get("data", []))
+                url = data.get("paging", {}).get("next")
+                params = {}
+            return results
+
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                # Fetch ad-level insights for the date window
+                ads_insights = await paginate(client, f"{META_API_BASE}/{account_id}/insights", {
+                    "access_token": self.meta_token,
+                    "level": "ad",
+                    "fields": (
+                        "ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,"
+                        "spend,impressions,clicks,reach,ctr,cpc,cpm,actions"
+                    ),
+                    "time_range": f'{{"since":"{since}","until":"{until}"}}',
+                    "limit": 500,
+                })
+
+                # Filter out zero-activity rows
+                active_ads = [
+                    a for a in ads_insights
+                    if float(a.get("spend", 0)) > 0 or int(a.get("impressions", 0)) > 0
+                ]
+
+                # If search terms provided, filter to matching ad names
+                if search_terms:
+                    terms_lower = [t.lower() for t in search_terms]
+                    active_ads = [
+                        a for a in active_ads
+                        if any(term in a.get("ad_name", "").lower() for term in terms_lower)
+                    ]
+
+                # Build enriched ad records
+                enriched = []
+                for a in active_ads:
+                    spend = float(a.get("spend", 0))
+                    impressions = int(a.get("impressions", 0))
+                    clicks = int(a.get("clicks", 0))
+                    ctr = float(a.get("ctr", 0))
+                    cpc = float(a.get("cpc", 0))
+                    cpm = float(a.get("cpm", 0))
+
+                    leads = 0
+                    for action in a.get("actions", []):
+                        if action.get("action_type") == "lead":
+                            leads = int(action.get("value", 0))
+                            break
+
+                    cpl = round(spend / leads, 2) if leads > 0 else None
+
+                    campaign_name = a.get("campaign_name", "Unknown Campaign")
+                    traffic_keywords = ["open house", "visit", "visits"]
+                    is_traffic = any(kw in campaign_name.lower() for kw in traffic_keywords)
+
+                    enriched.append({
+                        "ad_id": a.get("ad_id", ""),
+                        "ad_name": a.get("ad_name", ""),
+                        "adset_id": a.get("adset_id", ""),
+                        "adset_name": a.get("adset_name", ""),
+                        "campaign_id": a.get("campaign_id", ""),
+                        "campaign_name": campaign_name,
+                        "is_traffic_campaign": is_traffic,
+                        "spend": round(spend, 2),
+                        "impressions": impressions,
+                        "clicks": clicks,
+                        "ctr": round(ctr, 2),
+                        "cpc": round(cpc, 2),
+                        "cpm": round(cpm, 2),
+                        "leads": leads,
+                        "cpl": cpl,
+                    })
+
+                # Sort by spend descending
+                enriched.sort(key=lambda x: x["spend"], reverse=True)
+
+                logger.info(
+                    "meta_ads_by_date_range",
+                    account_id=account_id,
+                    date_range=f"{since} to {until}",
+                    total_ads=len(enriched),
+                    search_terms=search_terms,
+                )
+
+                return {
+                    "success": True,
+                    "account_id": account_id,
+                    "date_range": {"start": since, "end": until},
+                    "search_terms": search_terms or [],
+                    "total_ads": len(enriched),
+                    "ads": enriched,
+                }
+
+        except Exception as e:
+            logger.error("meta_ads_by_date_range_error", error=str(e))
+            return {"success": False, "error": str(e)}
+
+    def format_ads_for_context(self, data: Dict[str, Any]) -> str:
+        """
+        Format ad-level data as readable context for Jarvis.
+        Groups by campaign → ad set → individual ads.
+        """
+        if not data.get("success"):
+            return f"Ad-level data unavailable: {data.get('error', 'Unknown error')}"
+
+        ads = data.get("ads", [])
+        date_start = data["date_range"]["start"]
+        date_end = data["date_range"]["end"]
+        search_terms = data.get("search_terms", [])
+
+        header = "=== AD-LEVEL PERFORMANCE DATA ==="
+        if search_terms:
+            header += f"\nFiltered to ads matching: {', '.join(search_terms)}"
+        lines = [
+            header,
+            f"Date Range: {date_start} to {date_end}",
+            f"Total ads with activity: {len(ads)}",
+            "⚠️  Only ads with spend or impressions in this window are shown.",
+            "",
+        ]
+
+        if not ads:
+            lines.append("No ads matched the search criteria in this date range.")
+            return "\n".join(lines)
+
+        # Group by campaign → adset
+        by_campaign: Dict[str, Dict[str, List[dict]]] = {}
+        for ad in ads:
+            cname = ad["campaign_name"]
+            aname = ad["adset_name"]
+            by_campaign.setdefault(cname, {}).setdefault(aname, []).append(ad)
+
+        for campaign_name, adsets in sorted(by_campaign.items()):
+            is_traffic = list(adsets.values())[0][0].get("is_traffic_campaign", False)
+            camp_label = "🚗 TRAFFIC" if is_traffic else "📣 LEAD-GEN"
+            camp_spend = sum(ad["spend"] for ads_list in adsets.values() for ad in ads_list)
+            lines.append(f"{camp_label} Campaign: {campaign_name}  |  Window spend: ${camp_spend:,.2f}")
+
+            for adset_name, adset_ads in sorted(adsets.items()):
+                adset_spend = sum(a["spend"] for a in adset_ads)
+                lines.append(f"  📂 Ad Set: {adset_name}  |  Spend: ${adset_spend:,.2f}")
+
+                for ad in sorted(adset_ads, key=lambda x: x["spend"], reverse=True):
+                    leads_str = (
+                        f"Leads: {ad['leads']} | CPL: ${ad['cpl']:.2f}"
+                        if ad["leads"] > 0
+                        else ("Leads: 0" if not is_traffic else "")
+                    )
+                    metric_str = (
+                        f"Impr: {ad['impressions']:,} | CTR: {ad['ctr']:.2f}% | CPC: ${ad['cpc']:.2f}"
+                        if is_traffic
+                        else f"Impr: {ad['impressions']:,} | Clicks: {ad['clicks']:,} | {leads_str}"
+                    )
+                    lines.append(
+                        f"    🎯 {ad['ad_name']}\n"
+                        f"       Spend: ${ad['spend']:,.2f} | {metric_str}"
+                    )
+                lines.append("")
+            lines.append("")
+
+        return "\n".join(lines)
+
     async def get_meta_active_ads_with_performance(
         self,
         account_id: str,

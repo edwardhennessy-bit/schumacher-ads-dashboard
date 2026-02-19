@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from slack_bolt.async_app import AsyncApp
 from slack_sdk.web.async_client import AsyncWebClient
@@ -486,10 +486,53 @@ class SlackBot:
         "adreview", "too many ads", "cut ads", "reduce ads", "active ads",
     ]
 
+    # Keywords that signal the user is asking about specific ads/creatives
+    _AD_LOOKUP_KEYWORDS = [
+        "ad ", "ads ", "creative", "batch", "batches", "specific ad",
+        "this ad", "these ads", "the ad", "ad name", "ad called",
+        "| car |", "| img |", "| bof |", "| mof |", "| tof |",
+        "websiteleads", "learn more", "floorplan", "dreamhome",
+        "modelhome", "winner +", "variant",
+    ]
+
     def _is_ad_limit_query(self, query: str) -> bool:
         """Return True if the query is related to the ad limit / pausing ads."""
         q = query.lower()
         return any(kw in q for kw in self._AD_LIMIT_KEYWORDS)
+
+    def _is_ad_lookup_query(self, query: str) -> bool:
+        """
+        Return True if the query references specific ads or creative names.
+        This triggers ad-level data fetching so Jarvis can look up individual ads.
+        """
+        q = query.lower()
+        # Pipe-delimited naming convention used in Schumacher ad names
+        if q.count("|") >= 2:
+            return True
+        return any(kw in q for kw in self._AD_LOOKUP_KEYWORDS)
+
+    def _extract_search_terms(self, query: str) -> List[str]:
+        """
+        Extract potential ad name fragments from the query to use as search filters.
+        Splits on common delimiters and returns non-trivial tokens.
+        """
+        # Pull out pipe-delimited tokens if present (e.g. "Winner + floorplans | CAR | MOF")
+        if "|" in query:
+            # Take the full pipe-delimited expression as one search term per segment
+            tokens = [t.strip() for t in query.replace("•", "").split("|")]
+            # Also add the full ad name as a search term (everything before the last pipe segment)
+            terms = [t for t in tokens if len(t) > 2]
+            # Reconstruct likely full ad name segments (join adjacent tokens)
+            if len(terms) >= 2:
+                terms.append(" | ".join(terms[:3]))  # first 3 segments often = ad name
+            return list(dict.fromkeys(terms))  # deduplicate preserving order
+
+        # Otherwise use words longer than 4 chars that aren't stopwords
+        stopwords = {"what", "how", "did", "does", "with", "about", "these", "those",
+                     "that", "this", "from", "have", "show", "tell", "look", "give",
+                     "their", "they", "them", "then", "than", "when", "where", "which"}
+        words = re.findall(r"[A-Za-z0-9+]+", query)
+        return [w for w in words if len(w) > 4 and w.lower() not in stopwords]
 
     async def analyze_and_respond(
         self,
@@ -688,7 +731,7 @@ class SlackBot:
                         f"Data: {str(file_data)[:2000]}"
                     )
 
-            # Fetch active ads performance data if this is an ad-limit query
+            # Fetch active ads performance data if this is an ad-limit/pause query
             if force_ad_performance or self._is_ad_limit_query(user_query):
                 try:
                     await client.chat_update(
@@ -696,8 +739,6 @@ class SlackBot:
                         ts=thinking_msg["ts"],
                         text=":hourglass_flowing_sand: Fetching active ad performance data...",
                     )
-                    settings = get_settings()
-                    account_id = get_account_id_from_query(user_query)
                     ad_perf_data = await self.live_api.get_meta_active_ads_with_performance(account_id)
                     if ad_perf_data.get("success"):
                         ad_perf_context = self.live_api.format_active_ads_for_jarvis(ad_perf_data)
@@ -705,6 +746,36 @@ class SlackBot:
                         logger.info("ad_performance_context_injected", ad_count=ad_perf_data.get("total_active_ads"))
                 except Exception as e:
                     logger.warning("ad_performance_fetch_failed", error=str(e))
+
+            # Fetch ad-level data if user is asking about specific ads/creatives
+            elif self._is_ad_lookup_query(user_query):
+                try:
+                    await client.chat_update(
+                        channel=channel,
+                        ts=thinking_msg["ts"],
+                        text=":hourglass_flowing_sand: Looking up individual ad performance data...",
+                    )
+                    # Extract name fragments from the query to filter results
+                    search_terms = self._extract_search_terms(user_query)
+                    logger.info("ad_lookup_triggered", search_terms=search_terms)
+
+                    ad_lookup_data = await self.live_api.get_meta_ads_by_date_range(
+                        account_id=account_id,
+                        date_range=date_range,
+                        search_terms=search_terms if search_terms else None,
+                    )
+                    if ad_lookup_data.get("success"):
+                        ad_lookup_context = self.live_api.format_ads_for_context(ad_lookup_data)
+                        additional_context_parts.insert(0, ad_lookup_context)
+                        logger.info(
+                            "ad_lookup_context_injected",
+                            ad_count=ad_lookup_data.get("total_ads"),
+                            search_terms=search_terms,
+                        )
+                    else:
+                        logger.warning("ad_lookup_failed", error=ad_lookup_data.get("error"))
+                except Exception as e:
+                    logger.warning("ad_lookup_fetch_failed", error=str(e))
 
             # Add live API data to context if we fetched it
             if live_api_context:
