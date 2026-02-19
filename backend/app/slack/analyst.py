@@ -216,6 +216,7 @@ class AnthropicAnalyst:
         performance_data: Dict[str, Any],
         user_query: str,
         additional_context: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """
         Analyze performance data and generate strategic recommendations.
@@ -223,31 +224,43 @@ class AnthropicAnalyst:
         Args:
             performance_data: Dictionary containing campaign/platform performance metrics.
             user_query: The user's specific question or request.
-            additional_context: Optional additional context from uploaded files or thread.
+            additional_context: Optional additional context from live API data,
+                                 uploaded files, or thread context.
+            conversation_history: Ordered list of prior {"role", "content"} exchanges
+                                   for this specific Slack thread.  Passed in from the
+                                   bot so each thread has its own isolated history
+                                   rather than a single shared global list.
 
         Returns:
             Analysis response with recommendations.
         """
-        # Build the analysis prompt
+        # Build the current turn's user message.
+        # Live API data and uploaded file contents go in additional_context —
+        # they're injected fresh each turn so history stays clean (just Q&A).
         data_summary = self._format_performance_data(performance_data)
 
-        prompt = f"""## Current Performance Data
-{data_summary}
+        prompt_parts = []
+        if data_summary and data_summary != "No performance data available.":
+            prompt_parts.append(f"## Current Performance Data\n{data_summary}")
 
-## User Request
-{user_query}
-"""
+        prompt_parts.append(f"## User Request\n{user_query}")
+
         if additional_context:
-            prompt += f"""
-## Additional Context
-{additional_context}
-"""
+            prompt_parts.append(f"## Live Data & Context\n{additional_context}")
 
-        # Build messages with conversation context
-        messages = self._conversation_context.copy()
-        messages.append({"role": "user", "content": prompt})
+        prompt = "\n\n".join(prompt_parts)
 
-        logger.info("requesting_analysis", query_length=len(user_query))
+        # Use the per-thread history passed in from the bot.
+        # Fall back to the instance-level list only if nothing was passed
+        # (backward-compat for any direct callers).
+        history = conversation_history if conversation_history is not None else self._conversation_context
+        messages = list(history) + [{"role": "user", "content": prompt}]
+
+        logger.info(
+            "requesting_analysis",
+            query_length=len(user_query),
+            history_turns=len(history) // 2,
+        )
 
         # Run synchronous Anthropic API call in thread pool to avoid blocking event loop
         def _make_request():
@@ -259,15 +272,9 @@ class AnthropicAnalyst:
             )
 
         response = await asyncio.to_thread(_make_request)
-
         analysis = response.content[0].text
 
-        # Store this exchange in context for follow-up questions
-        self._conversation_context.append({"role": "user", "content": prompt})
-        self._conversation_context.append({"role": "assistant", "content": analysis})
-
         logger.info("analysis_complete", response_length=len(analysis))
-
         return analysis
 
     async def generate_budget_allocation(

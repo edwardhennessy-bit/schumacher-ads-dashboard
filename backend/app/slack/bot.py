@@ -121,6 +121,7 @@ class SlackBot:
                 key = self.get_thread_key(channel, thread_ts)
                 if key in self._thread_contexts:
                     del self._thread_contexts[key]
+                # analyst._conversation_context is now vestigial but clear it too
                 self.analyst.clear_context()
                 await client.chat_postMessage(
                     channel=channel,
@@ -320,23 +321,58 @@ class SlackBot:
 
         logger.info("slack_handlers_registered")
 
+    # Maximum number of prior exchanges to carry in context per thread.
+    # Each exchange = 1 user turn + 1 assistant turn.  Keeping this bounded
+    # prevents token bloat while still giving Jarvis enough back-history to
+    # follow a conversation without needing re-explanation.
+    _MAX_HISTORY_TURNS = 10
+
     def get_thread_key(self, channel: str, thread_ts: Optional[str]) -> str:
-        """Generate a unique key for thread context storage."""
-        # Use channel-level storage so files are accessible across all messages in the channel
-        # This ensures files uploaded in any message are available when the bot is mentioned
+        """
+        Generate a unique key for thread context storage.
+
+        Uses the Slack thread_ts when available so each thread gets its own
+        isolated history.  Falls back to channel-level when no thread exists
+        (e.g. top-level DMs or channel messages not in a thread).
+        """
+        if thread_ts:
+            return f"{channel}:{thread_ts}"
         return f"{channel}:main"
 
     def get_thread_context(self, channel: str, thread_ts: Optional[str]) -> Dict[str, Any]:
-        """Get or create context for a thread/channel."""
+        """Get or create context for a thread."""
         key = self.get_thread_key(channel, thread_ts)
         if key not in self._thread_contexts:
             self._thread_contexts[key] = {
                 "uploaded_files": [],
                 "user_context": [],
                 "last_analysis": None,
+                # Clean message history for this thread — stores dicts of
+                # {"role": "user"|"assistant", "content": str} with the raw
+                # user question and Jarvis's response (not the full data dump).
+                "history": [],
             }
-        logger.debug("get_thread_context", key=key, files_count=len(self._thread_contexts[key]["uploaded_files"]))
+        logger.debug("get_thread_context", key=key,
+                     history_turns=len(self._thread_contexts[key].get("history", [])) // 2)
         return self._thread_contexts[key]
+
+    def _get_history(self, ctx: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Return the bounded message history for this thread."""
+        history = ctx.get("history", [])
+        # Each turn is a user+assistant pair (2 items); keep last N turns
+        max_messages = self._MAX_HISTORY_TURNS * 2
+        return history[-max_messages:] if len(history) > max_messages else history
+
+    def _append_history(
+        self,
+        ctx: Dict[str, Any],
+        user_query: str,
+        assistant_response: str,
+    ) -> None:
+        """Append a completed exchange to thread history."""
+        history = ctx.setdefault("history", [])
+        history.append({"role": "user", "content": user_query})
+        history.append({"role": "assistant", "content": assistant_response})
 
     def add_context_to_thread(
         self,
@@ -347,7 +383,8 @@ class SlackBot:
         """Add user-provided context to a thread."""
         ctx = self.get_thread_context(channel, thread_ts)
         ctx["user_context"].append(context)
-        self.analyst.add_context(context)
+        # Also inject it as a history exchange so Claude sees it as prior chat
+        self._append_history(ctx, f"context: {context}", "Understood. I'll keep that in mind.")
         logger.info("context_added_to_thread", channel=channel, thread_ts=thread_ts)
 
     async def process_file_upload(
@@ -856,13 +893,22 @@ class SlackBot:
             additional_context = "\n\n".join(additional_context_parts) if additional_context_parts else None
 
             # ── Stage 3: AI analysis ──────────────────────────────────────────
+            # Pull the clean Q&A history for this specific thread so Jarvis
+            # has full conversational context without re-explanation.
+            thread_history = self._get_history(ctx)
+
             analysis = await self.analyst.analyze_performance(
                 performance_data=performance_data,
                 user_query=user_query,
                 additional_context=additional_context,
+                conversation_history=thread_history,
             )
 
+            # Store this exchange back into thread history as clean Q&A
+            # (just the raw question + Jarvis's answer — not the data dumps)
+            self._append_history(ctx, user_query, analysis)
             ctx["last_analysis"] = analysis
+
             budget_table = parse_budget_table_from_response(analysis)
             slack_response = clean_response_for_slack(analysis)
 
