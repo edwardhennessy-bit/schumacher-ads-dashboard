@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="info", description="Logging level")
 
     # CORS
-    cors_origins: List[str] = ["http://localhost:3000"]
+    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:3001"]
 
     # Feature flags
     enable_slack_bot: bool = Field(default=True, description="Enable JARVIS Slack bot")

@@ -10,7 +10,7 @@ from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 import structlog
 
 from app.config import get_settings
-from app.routers import metrics_router, campaigns_router, audits_router, reports_router, chat_router
+from app.routers import metrics_router, campaigns_router, audits_router, reports_router, chat_router, microsoft_router
 from app.routers.gateway import router as gateway_router
 from app.routers.google_metrics import router as google_metrics_router
 from app.routers.auth import router as auth_router
@@ -137,6 +137,7 @@ app.include_router(google_metrics_router)
 app.include_router(auth_router)
 app.include_router(reporting_router)
 app.include_router(chat_router)
+app.include_router(microsoft_router)
 
 
 @app.get("/")

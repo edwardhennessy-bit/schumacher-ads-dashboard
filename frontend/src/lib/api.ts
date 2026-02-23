@@ -301,6 +301,28 @@ class ApiClient {
   }>> {
     return this.fetch("/api/reports/history");
   }
+
+  async generateWeeklyKpiSection(startDate: string, endDate: string): Promise<{
+    text: string;
+    period_label: string;
+    meta_spend: number;
+    google_spend: number;
+    microsoft_spend: number;
+    total_spend: number;
+    google_leads: number;
+    google_opportunities: number;
+    google_lead_to_opp_pct: number;
+    meta_leads: number;
+    meta_remarketing_cpa: number;
+    meta_prospecting_cpa: number;
+    bing_cpa: number;
+    bing_leads: number;
+  }> {
+    return this.fetch("/api/reports/weekly-kpi-section", {
+      method: "POST",
+      body: JSON.stringify({ start_date: startDate, end_date: endDate }),
+    });
+  }
 }
 
 // Export singleton instance

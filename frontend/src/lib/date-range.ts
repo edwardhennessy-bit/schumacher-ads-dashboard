@@ -78,7 +78,7 @@ export const DATE_PRESETS: DatePreset[] = [
   },
 ];
 
-export const DEFAULT_PRESET = "last_30d";
+export const DEFAULT_PRESET = "mtd";
 
 export function getPresetByValue(value: string): DatePreset | undefined {
   return DATE_PRESETS.find((p) => p.value === value);

@@ -34,7 +34,8 @@ export function Header({
   const handleExportActiveAds = async () => {
     setIsExporting(true);
     try {
-      const response = await fetch("http://localhost:8001/api/reports/active-ads/csv");
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+      const response = await fetch(`${apiBase}/api/reports/active-ads/csv`);
       if (!response.ok) throw new Error("Export failed");
 
       const blob = await response.blob();
