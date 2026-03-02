@@ -1,4 +1,4 @@
-import { subDays, subYears, startOfMonth, format } from "date-fns";
+import { subDays, subYears, subMonths, startOfMonth, endOfMonth, format } from "date-fns";
 
 export interface DateRange {
   startDate: string; // YYYY-MM-DD
@@ -27,6 +27,17 @@ export const DATE_PRESETS: DatePreset[] = [
       startDate: format(startOfMonth(new Date()), "yyyy-MM-dd"),
       endDate: yesterday(),
     }),
+  },
+  {
+    label: "Last Month",
+    value: "last_month",
+    getRange: () => {
+      const lastMonth = subMonths(new Date(), 1);
+      return {
+        startDate: format(startOfMonth(lastMonth), "yyyy-MM-dd"),
+        endDate: format(endOfMonth(lastMonth), "yyyy-MM-dd"),
+      };
+    },
   },
   {
     label: "Last 7 Days",

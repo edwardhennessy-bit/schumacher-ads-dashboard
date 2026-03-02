@@ -247,18 +247,20 @@ class GoogleAdsService:
             elif action_name == OPPORTUNITY_CONVERSION_ACTION:
                 opportunities += convs
 
+        leads_rounded = round(leads)
+        opps_rounded = round(opportunities)
         return {
             "success": True,
             "spend": round(spend, 2),
             "impressions": impressions,
             "clicks": clicks,
-            "conversions": round(leads + opportunities),
-            "leads": round(leads),
-            "opportunities": round(opportunities),
+            "conversions": leads_rounded + opps_rounded,
+            "leads": leads_rounded,
+            "opportunities": opps_rounded,
             "ctr": round(clicks / impressions * 100, 2) if impressions else 0,
             "cpc": round(spend / clicks, 2) if clicks else 0,
-            "cost_per_lead": round(spend / leads, 2) if leads else 0,
-            "cost_per_opportunity": round(spend / opportunities, 2) if opportunities else 0,
+            "cost_per_lead": round(spend / leads_rounded, 2) if leads_rounded > 0 else 0,
+            "cost_per_opportunity": round(spend / opps_rounded, 2) if opps_rounded > 0 else 0,
         }
 
     async def _campaign_perf_gateway(
@@ -465,13 +467,15 @@ class GoogleAdsService:
             total_leads = 0
             total_opps = 0
 
-        total["leads"] = round(total_leads)
-        total["opportunities"] = round(total_opps)
+        leads_rounded = round(total_leads)
+        opps_rounded = round(total_opps)
+        total["leads"] = leads_rounded
+        total["opportunities"] = opps_rounded
         total["cost_per_lead"] = (
-            round(total["spend"] / total_leads, 2) if total_leads else 0
+            round(total["spend"] / leads_rounded, 2) if leads_rounded > 0 else 0
         )
         total["cost_per_opportunity"] = (
-            round(total["spend"] / total_opps, 2) if total_opps else 0
+            round(total["spend"] / opps_rounded, 2) if opps_rounded > 0 else 0
         )
         return {"success": True, **total}
 
@@ -689,6 +693,8 @@ def _transform_campaign_rows(
             )
         )
 
+        leads_r = round(leads)
+        opps_r = round(opportunities)
         campaigns.append({
             "id": campaign_id,
             "name": c.get("name", ""),
@@ -701,24 +707,26 @@ def _transform_campaign_rows(
             "cpc": round(spend / clicks, 2) if clicks else 0,
             "conversions": round(conversions),
             "cost_per_conversion": round(spend / conversions, 2) if conversions else 0,
-            "leads": round(leads),
-            "cost_per_lead": round(spend / leads, 2) if leads else 0,
-            "opportunities": round(opportunities),
-            "cost_per_opportunity": round(spend / opportunities, 2) if opportunities else 0,
-            "lead_rate": round(leads / clicks * 100, 2) if clicks else 0,
+            "leads": leads_r,
+            "cost_per_lead": round(spend / leads_r, 2) if leads_r > 0 else 0,
+            "opportunities": opps_r,
+            "cost_per_opportunity": round(spend / opps_r, 2) if opps_r > 0 else 0,
+            "lead_rate": round(leads_r / clicks * 100, 2) if clicks else 0,
         })
 
+    total_leads_r = round(total_leads)
+    total_opps_r = round(total_opportunities)
     account = {
         "spend": round(total_spend, 2),
         "impressions": total_impressions,
         "clicks": total_clicks,
         "conversions": round(total_conversions),
-        "leads": round(total_leads),
-        "opportunities": round(total_opportunities),
+        "leads": total_leads_r,
+        "opportunities": total_opps_r,
         "ctr": round(total_clicks / total_impressions * 100, 2) if total_impressions else 0,
         "cpc": round(total_spend / total_clicks, 2) if total_clicks else 0,
-        "cost_per_lead": round(total_spend / total_leads, 2) if total_leads else 0,
-        "cost_per_opportunity": round(total_spend / total_opportunities, 2) if total_opportunities else 0,
+        "cost_per_lead": round(total_spend / total_leads_r, 2) if total_leads_r > 0 else 0,
+        "cost_per_opportunity": round(total_spend / total_opps_r, 2) if total_opps_r > 0 else 0,
     }
 
     return {

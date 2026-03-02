@@ -2,8 +2,6 @@
 Reporting router for generating slide decks, docs, and email drafts.
 """
 
-import json
-import os
 import structlog
 from datetime import date, datetime
 from typing import Optional
@@ -21,6 +19,7 @@ from app.services.docs_generator import DocsGenerator
 from app.services.email_generator import EmailGenerator
 from app.services.google_ads_api import GoogleAdsService
 from app.services.mcp_client import MCPGatewayClient
+from app.routers.microsoft import _parse_float, _parse_int, SCHUMACHER_MICROSOFT_ACCOUNT_ID
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/reports", tags=["reports_v2"])
@@ -251,21 +250,6 @@ def _fmt_date_label(start: str, end: str) -> str:
     return f"{months[s.month - 1]} {s.day} - {months[e.month - 1]} {e.day}"
 
 
-def _load_microsoft_data(start_date: str, end_date: str) -> dict:
-    """Load Microsoft scraped data for the given date range."""
-    data_file = os.path.join(
-        os.path.dirname(__file__), "../../../data/microsoft_scraped.json"
-    )
-    if not os.path.exists(data_file):
-        return {}
-    try:
-        with open(data_file) as f:
-            all_data = json.load(f)
-        range_key = f"{start_date}__{end_date}"
-        return all_data.get(range_key) or all_data.get("latest") or {}
-    except Exception:
-        return {}
-
 
 def _google_status(leads: int, opps: int, lead_to_opp_pct: float) -> str:
     """Determine Google status vs. targets (>950 leads/month AND ≥10% L2O)."""
@@ -337,8 +321,8 @@ def _segment_campaign_cpls(campaigns: list) -> dict:
 async def generate_weekly_kpi_section(req: WeeklyKpiRequest):
     """
     Generate the Performance Metrics & KPIs section for the weekly agenda doc.
-    Fetches live Meta + Google data and stored Microsoft data, then uses Claude
-    to produce a copy-paste ready text block matching the standard template.
+    Fetches live data from Meta, Google Ads, and Microsoft Ads (all via MCP gateway),
+    then uses Claude to produce a copy-paste ready text block matching the standard template.
     """
     import asyncio as _asyncio
     from app.services.live_api import LiveAPIService, DateRange as LiveDateRange
@@ -375,10 +359,31 @@ async def generate_weekly_kpi_section(req: WeeklyKpiRequest):
         except Exception as e:
             logger.warning("meta_live_fetch_error", error=str(e))
 
-    # ── 2. Fetch Google + Microsoft data ──────────────────────────────────
+    # ── 2. Fetch Google + Microsoft data (both live via MCP gateway) ──────
     collector = _build_data_collector()
-    google_raw = await collector._fetch_google_overview(dr)
-    ms_raw = _load_microsoft_data(req.start_date, req.end_date)
+    mcp = MCPGatewayClient(
+        gateway_url=settings.gateway_url,
+        gateway_token=settings.gateway_token,
+    )
+
+    async def _fetch_ms_live() -> list:
+        if not mcp.is_configured:
+            return []
+        try:
+            result = await mcp.call_tool("microsoft_ads_campaign_performance", {
+                "accountId": SCHUMACHER_MICROSOFT_ACCOUNT_ID,
+                "startDate": req.start_date,
+                "endDate": req.end_date,
+            })
+            return result if isinstance(result, list) else result.get("data", [])
+        except Exception as e:
+            logger.warning("microsoft_reporting_fetch_error", error=str(e))
+            return []
+
+    google_raw, ms_rows = await _asyncio.gather(
+        collector._fetch_google_overview(dr),
+        _fetch_ms_live(),
+    )
 
     # ── 3. Extract remaining metrics ─────────────────────────────────────
     google_spend = float(google_raw.get("spend", 0)) if google_raw else 0
@@ -386,9 +391,9 @@ async def generate_weekly_kpi_section(req: WeeklyKpiRequest):
     google_opps = int(google_raw.get("opportunities", 0)) if google_raw else 0
     google_l2o = round(google_opps / google_leads * 100, 1) if google_leads > 0 else 0.0
 
-    ms_spend = float(ms_raw.get("spend", 0)) if ms_raw else 0
-    ms_leads = int(ms_raw.get("leads", 0)) if ms_raw else 0
-    ms_cpa = float(ms_raw.get("cost_per_lead", 0)) if ms_raw else 0
+    ms_spend = round(sum(_parse_float(r.get("Spend", 0)) for r in ms_rows), 2)
+    ms_leads = sum(_parse_int(r.get("Conversions", 0)) for r in ms_rows)
+    ms_cpa = round(ms_spend / ms_leads, 2) if ms_leads > 0 else 0.0
 
     total_spend = meta_spend + google_spend + ms_spend
 

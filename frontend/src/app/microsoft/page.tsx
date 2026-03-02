@@ -9,9 +9,6 @@ import {
   UserPlus,
   Users,
   MousePointerClick,
-  ScanSearch,
-  CheckCircle2,
-  Clock,
   Target,
 } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/mock-data";
@@ -19,28 +16,47 @@ import { DateRange, DEFAULT_PRESET, getPresetByValue } from "@/lib/date-range";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
-interface MicrosoftData {
-  connected: boolean;
+interface Campaign {
+  id: string;
+  name: string;
+  status: string;
   spend: number;
   impressions: number;
   clicks: number;
   ctr: number;
   cpc: number;
-  leads: number;
-  cost_per_lead: number;
   conversions: number;
   cost_per_conversion: number;
-  campaigns: Array<{ name: string; spend: string; clicks: string; impressions: string }>;
+}
+
+interface MicrosoftData {
+  connected: boolean;
+  live: boolean;
+  spend: number;
+  spend_change: number;
+  impressions: number;
+  impressions_change: number;
+  clicks: number;
+  clicks_change: number;
+  ctr: number;
+  ctr_change: number;
+  cpc: number;
+  cpc_change: number;
+  leads: number;
+  leads_change: number;
+  cost_per_lead: number;
+  cost_per_lead_change: number;
+  conversions: number;
+  conversions_change: number;
+  cost_per_conversion: number;
+  campaigns: Campaign[];
   start_date?: string;
   end_date?: string;
-  scraped_at?: string;
 }
 
 export default function MicrosoftDashboardPage() {
   const [data, setData] = useState<MicrosoftData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isScraping, setIsScraping] = useState(false);
-  const [scrapeStatus, setScrapeStatus] = useState("");
   const [selectedPreset, setSelectedPreset] = useState(DEFAULT_PRESET);
   const [customRange, setCustomRange] = useState<DateRange | null>(null);
 
@@ -61,6 +77,9 @@ export default function MicrosoftDashboardPage() {
         const d: MicrosoftData = await res.json();
         setData(d.connected ? d : null);
       }
+    } catch (err) {
+      console.error("Microsoft fetch error:", err);
+      setData(null);
     } finally {
       setIsLoading(false);
     }
@@ -68,66 +87,7 @@ export default function MicrosoftDashboardPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handleScrape = async () => {
-    if (isScraping) return;
-    setIsScraping(true);
-    setScrapeStatus("Opening Microsoft Ads...");
-
-    const dateRange = getActiveDateRange();
-    const { startDate, endDate } = dateRange;
-    const fmtDate = (iso: string) => { const [y,m,d] = iso.split("-"); return `${m}/${d}/${y}`; };
-
-    const adsUrl =
-      `https://ui.ads.microsoft.com/campaign/vnext/campaigns` +
-      `?startDate=${encodeURIComponent(fmtDate(startDate))}&endDate=${encodeURIComponent(fmtDate(endDate))}`;
-
-    const tab = window.open(adsUrl, "_blank");
-    if (!tab) { setScrapeStatus("Popup blocked — allow popups and try again"); setIsScraping(false); return; }
-
-    setScrapeStatus("Waiting for Microsoft Ads to load... (15–30 seconds)");
-
-    const result = await new Promise<MicrosoftData | null>((resolve) => {
-      const timeout = setTimeout(() => {
-        setScrapeStatus("Timed out — make sure you are logged in to Microsoft Ads");
-        resolve(null);
-      }, 60_000);
-
-      const handler = async (event: MessageEvent) => {
-        if (!event.data || event.data.source !== "schumacher_ms_scraper") return;
-        clearTimeout(timeout);
-        window.removeEventListener("message", handler);
-
-        const raw = event.data.payload as Record<string, string>;
-        if (!raw || raw.error) { setScrapeStatus(`Error: ${raw?.error ?? "unknown"}`); resolve(null); return; }
-
-        setScrapeStatus("Saving...");
-        const p = (v: string) => parseFloat((v||"0").replace(/[$,%]/g,"").replace(/,/g,"")) || 0;
-        const spend = p(raw.spend), impressions = p(raw.impressions), clicks = p(raw.clicks);
-        const ctr = p(raw.ctr), cpc = p(raw.cpc), conversions = p(raw.conversions);
-        const payload = {
-          start_date: startDate, end_date: endDate, spend, impressions, clicks, ctr, cpc,
-          conversions, cost_per_conversion: conversions > 0 ? spend / conversions : 0,
-          leads: conversions, cost_per_lead: conversions > 0 ? spend / conversions : 0,
-          campaigns: raw.campaigns ? JSON.parse(raw.campaigns) : [],
-        };
-        try {
-          await fetch(`${API_BASE}/api/microsoft/ingest`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          setScrapeStatus("Done ✓");
-          resolve({ ...payload, connected: true });
-        } catch(e) { setScrapeStatus(`Save failed: ${e}`); resolve(null); }
-      };
-      window.addEventListener("message", handler);
-    });
-
-    if (result) setData(result);
-    setIsScraping(false);
-  };
-
   const connected = !!data?.connected;
-  const scrapedAt = data?.scraped_at ? new Date(data.scraped_at).toLocaleString() : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -143,77 +103,98 @@ export default function MicrosoftDashboardPage() {
       />
 
       <div className="p-6 space-y-6">
-        {/* Header row */}
+        {/* Status badge */}
         <div className="flex items-center gap-3">
           <div className={`w-3 h-3 rounded-full ${connected ? "bg-cyan-500" : "bg-gray-400"}`} />
           {connected ? (
-            <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-cyan-50 text-cyan-700 border border-cyan-200">
-              <CheckCircle2 className="h-3 w-3" /> Scraped
+            <span className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded bg-green-100 text-green-700 font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              Live
             </span>
           ) : (
-            <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">Not Scraped</span>
+            <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">Not Connected</span>
           )}
-          {scrapedAt && (
-            <span className="flex items-center gap-1 text-xs text-gray-400">
-              <Clock className="h-3 w-3" /> {scrapedAt}
+          {data?.start_date && data?.end_date && (
+            <span className="text-xs text-gray-400">
+              {data.start_date} → {data.end_date}
             </span>
           )}
-          <button
-            onClick={handleScrape}
-            disabled={isScraping}
-            className={`ml-auto flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-md border transition-all
-              ${isScraping
-                ? "bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed"
-                : "bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100 hover:border-cyan-300 cursor-pointer"
-              }`}
-          >
-            <ScanSearch className="h-4 w-4" />
-            {isScraping ? "Scraping..." : connected ? "Re-Scrape" : "Scrape Microsoft Ads"}
-          </button>
         </div>
 
-        {/* Status bar */}
-        {isScraping && scrapeStatus && (
-          <div className="text-sm text-cyan-700 bg-cyan-50 border border-cyan-200 rounded px-4 py-3 flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-cyan-500 animate-pulse" />
-            {scrapeStatus}
-          </div>
-        )}
-        {!isScraping && scrapeStatus === "Done ✓" && (
-          <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded px-4 py-3 flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4" /> Scrape complete — data updated
-          </div>
-        )}
-
-        {/* KPI Cards */}
         {connected && data ? (
           <>
+            {/* Primary KPIs */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-              <MetricCard title="Spend" value={formatCurrency(data.spend)}
-                icon={<DollarSign className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
-              <MetricCard title="Leads / Conversions" value={formatNumber(data.leads)}
-                icon={<UserPlus className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
-              <MetricCard title="Cost / Lead" value={formatCurrency(data.cost_per_lead)}
-                invertTrend icon={<Users className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
-              <MetricCard title="Clicks" value={formatNumber(data.clicks)}
-                icon={<MousePointerClick className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
-              <MetricCard title="Avg. CPC" value={formatCurrency(data.cpc)}
-                invertTrend icon={<DollarSign className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
+              <MetricCard
+                title="Spend"
+                value={formatCurrency(data.spend)}
+                change={data.spend_change}
+                icon={<DollarSign className="h-4 w-4" />}
+                className="border-l-4 border-l-cyan-500"
+              />
+              <MetricCard
+                title="Leads / Conversions"
+                value={formatNumber(data.leads)}
+                change={data.leads_change}
+                icon={<UserPlus className="h-4 w-4" />}
+                className="border-l-4 border-l-cyan-500"
+              />
+              <MetricCard
+                title="Cost / Lead"
+                value={formatCurrency(data.cost_per_lead)}
+                change={data.cost_per_lead_change}
+                invertTrend
+                icon={<Users className="h-4 w-4" />}
+                className="border-l-4 border-l-cyan-500"
+              />
+              <MetricCard
+                title="Clicks"
+                value={formatNumber(data.clicks)}
+                change={data.clicks_change}
+                icon={<MousePointerClick className="h-4 w-4" />}
+                className="border-l-4 border-l-cyan-500"
+              />
+              <MetricCard
+                title="Avg. CPC"
+                value={formatCurrency(data.cpc)}
+                change={data.cpc_change}
+                invertTrend
+                icon={<DollarSign className="h-4 w-4" />}
+                className="border-l-4 border-l-cyan-500"
+              />
             </div>
 
+            {/* Secondary KPIs */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <MetricCard title="Impressions" value={formatNumber(data.impressions)}
-                icon={<Monitor className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
-              <MetricCard title="CTR" value={`${data.ctr.toFixed(2)}%`}
-                icon={<MousePointerClick className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
-              <MetricCard title="Conversions" value={formatNumber(data.conversions)}
-                icon={<Target className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
+              <MetricCard
+                title="Impressions"
+                value={formatNumber(data.impressions)}
+                change={data.impressions_change}
+                icon={<Monitor className="h-4 w-4" />}
+                className="border-l-4 border-l-cyan-500"
+              />
+              <MetricCard
+                title="CTR"
+                value={`${data.ctr.toFixed(2)}%`}
+                change={data.ctr_change}
+                icon={<MousePointerClick className="h-4 w-4" />}
+                className="border-l-4 border-l-cyan-500"
+              />
+              <MetricCard
+                title="Conversions"
+                value={formatNumber(data.conversions)}
+                change={data.conversions_change}
+                icon={<Target className="h-4 w-4" />}
+                className="border-l-4 border-l-cyan-500"
+              />
             </div>
 
             {/* Campaign breakdown */}
             {data.campaigns && data.campaigns.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold mb-3 text-gray-700">Campaign Breakdown</h3>
+                <h3 className="text-sm font-semibold mb-3 text-gray-700">
+                  Campaign Breakdown ({data.campaigns.length} campaigns)
+                </h3>
                 <div className="rounded-lg border overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
@@ -222,15 +203,31 @@ export default function MicrosoftDashboardPage() {
                         <th className="px-4 py-2 text-right">Spend</th>
                         <th className="px-4 py-2 text-right">Clicks</th>
                         <th className="px-4 py-2 text-right">Impressions</th>
+                        <th className="px-4 py-2 text-right">Conv.</th>
+                        <th className="px-4 py-2 text-right">CPL</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {data.campaigns.map((c, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-4 py-2 font-medium text-gray-800">{c.name || "—"}</td>
-                          <td className="px-4 py-2 text-right text-gray-600">{c.spend || "—"}</td>
-                          <td className="px-4 py-2 text-right text-gray-600">{c.clicks || "—"}</td>
-                          <td className="px-4 py-2 text-right text-gray-600">{c.impressions || "—"}</td>
+                      {data.campaigns.map((c) => (
+                        <tr key={c.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2 font-medium text-gray-800 max-w-xs truncate">
+                            {c.name || "—"}
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-600">
+                            {formatCurrency(c.spend)}
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-600">
+                            {formatNumber(c.clicks)}
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-600">
+                            {formatNumber(c.impressions)}
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-600">
+                            {c.conversions}
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-600">
+                            {c.cost_per_conversion > 0 ? formatCurrency(c.cost_per_conversion) : "—"}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -240,25 +237,18 @@ export default function MicrosoftDashboardPage() {
             )}
           </>
         ) : (
-          /* Empty state */
           <div className="flex flex-col items-center justify-center py-20">
             <div className="rounded-full bg-cyan-50 p-6 mb-6">
               <Monitor className="h-12 w-12 text-cyan-500" />
             </div>
-            <h2 className="text-xl font-bold mb-2">No Microsoft Ads data yet</h2>
-            <p className="text-muted-foreground text-center max-w-md mb-6">
-              Click <strong>Scrape Microsoft Ads</strong> above to open the Microsoft Ads UI,
-              extract performance data for the selected date range, and populate this dashboard.
-              Make sure you are logged in to Microsoft Ads first.
+            <h2 className="text-xl font-bold mb-2">
+              {isLoading ? "Loading Microsoft Ads data..." : "No data available"}
+            </h2>
+            <p className="text-muted-foreground text-center max-w-md">
+              {isLoading
+                ? "Fetching live data from Microsoft Ads via the gateway..."
+                : "No Microsoft Ads data was returned for the selected date range."}
             </p>
-            <button
-              onClick={handleScrape}
-              disabled={isScraping}
-              className="flex items-center gap-2 bg-cyan-600 text-white px-5 py-2.5 rounded-lg hover:bg-cyan-700 transition-colors font-medium"
-            >
-              <ScanSearch className="h-4 w-4" />
-              {isScraping ? "Scraping..." : "Scrape Microsoft Ads"}
-            </button>
           </div>
         )}
       </div>
