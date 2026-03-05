@@ -906,17 +906,32 @@ def _safe_filename(report_month: str) -> str:
 def _upload_to_drive(pptx_bytes: bytes, filename: str) -> str:
     """Upload a PPTX to Google Drive, converting to Google Slides. Returns webViewLink."""
     try:
-        from google.oauth2 import service_account
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaIoBaseUpload
     except ImportError:
         raise HTTPException(status_code=500, detail="google-api-python-client not installed")
 
-    creds_dict = json.loads(settings.google_service_account_json)
-    credentials = service_account.Credentials.from_service_account_info(
-        creds_dict,
-        scopes=["https://www.googleapis.com/auth/drive.file"],
-    )
+    # Prefer user OAuth2 credentials (no storage quota issue)
+    # Fall back to service account if user creds not configured
+    if (settings.google_drive_client_id and
+            settings.google_drive_client_secret and
+            settings.google_drive_refresh_token):
+        from google.oauth2.credentials import Credentials
+        credentials = Credentials(
+            token=None,
+            refresh_token=settings.google_drive_refresh_token,
+            client_id=settings.google_drive_client_id,
+            client_secret=settings.google_drive_client_secret,
+            token_uri="https://oauth2.googleapis.com/token",
+        )
+    else:
+        from google.oauth2 import service_account
+        creds_dict = json.loads(settings.google_service_account_json)
+        credentials = service_account.Credentials.from_service_account_info(
+            creds_dict,
+            scopes=["https://www.googleapis.com/auth/drive.file"],
+        )
+
     drive = build("drive", "v3", credentials=credentials)
 
     # Upload PPTX and convert to Google Slides on the fly
@@ -924,6 +939,11 @@ def _upload_to_drive(pptx_bytes: bytes, filename: str) -> str:
         "name": filename,
         "mimeType": "application/vnd.google-apps.presentation",
     }
+    # Upload into the user's shared folder if configured (avoids service-account storage quota)
+    folder_id = settings.google_slides_folder_id.strip()
+    if folder_id:
+        file_meta["parents"] = [folder_id]
+
     media = MediaIoBaseUpload(
         io.BytesIO(pptx_bytes),
         mimetype="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -933,6 +953,7 @@ def _upload_to_drive(pptx_bytes: bytes, filename: str) -> str:
         body=file_meta,
         media_body=media,
         fields="id,webViewLink",
+        supportsAllDrives=True,
     ).execute()
 
     file_id = created["id"]

@@ -45,6 +45,14 @@ class Settings(BaseSettings):
         default="",
         description="Email address to grant editor access to created presentations",
     )
+    google_slides_folder_id: str = Field(
+        default="",
+        description="Google Drive folder ID to upload reports into (share this folder with the service account)",
+    )
+    # User OAuth2 credentials for Drive upload (preferred over service account)
+    google_drive_client_id: str = Field(default="", description="OAuth2 client_id for Drive upload")
+    google_drive_client_secret: str = Field(default="", description="OAuth2 client_secret for Drive upload")
+    google_drive_refresh_token: str = Field(default="", description="OAuth2 refresh_token for Drive upload")
 
     # Claude API
     anthropic_api_key: str = ""
