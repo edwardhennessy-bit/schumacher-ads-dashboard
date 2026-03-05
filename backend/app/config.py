@@ -36,6 +36,16 @@ class Settings(BaseSettings):
         description="Google OAuth2 redirect URI",
     )
 
+    # Google Drive / Slides export (Monthly Report)
+    google_service_account_json: str = Field(
+        default="",
+        description="Full Google Service Account JSON (single-line) for Drive upload",
+    )
+    google_slides_share_email: str = Field(
+        default="",
+        description="Email address to grant editor access to created presentations",
+    )
+
     # Claude API
     anthropic_api_key: str = ""
 

@@ -24,8 +24,11 @@ from typing import Any, Dict, List, Optional
 import anthropic
 import httpx
 import structlog
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel
+
+from app.services.pptx_builder import build_pptx
 
 from app.config import get_settings
 from app.routers.microsoft import _parse_float, _parse_int, SCHUMACHER_MICROSOFT_ACCOUNT_ID
@@ -890,3 +893,132 @@ async def parse_scorecard_file(file: UploadFile = File(...)):
     except Exception as e:
         logger.error("scorecard_parse_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── PPTX / Google Slides export ────────────────────────────────────────────
+
+def _safe_filename(report_month: str) -> str:
+    """Return a safe filename stem for the report."""
+    safe = report_month.replace("/", "-").replace("\\", "-").strip()
+    return f"Schumacher Homes - {safe} Performance Report"
+
+
+def _upload_to_drive(pptx_bytes: bytes, filename: str) -> str:
+    """Upload a PPTX to Google Drive, converting to Google Slides. Returns webViewLink."""
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaIoBaseUpload
+    except ImportError:
+        raise HTTPException(status_code=500, detail="google-api-python-client not installed")
+
+    creds_dict = json.loads(settings.google_service_account_json)
+    credentials = service_account.Credentials.from_service_account_info(
+        creds_dict,
+        scopes=["https://www.googleapis.com/auth/drive.file"],
+    )
+    drive = build("drive", "v3", credentials=credentials)
+
+    # Upload PPTX and convert to Google Slides on the fly
+    file_meta = {
+        "name": filename,
+        "mimeType": "application/vnd.google-apps.presentation",
+    }
+    media = MediaIoBaseUpload(
+        io.BytesIO(pptx_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        resumable=False,
+    )
+    created = drive.files().create(
+        body=file_meta,
+        media_body=media,
+        fields="id,webViewLink",
+    ).execute()
+
+    file_id = created["id"]
+
+    # Share with configured email (editor access)
+    if settings.google_slides_share_email:
+        drive.permissions().create(
+            fileId=file_id,
+            body={
+                "type": "user",
+                "role": "writer",
+                "emailAddress": settings.google_slides_share_email,
+            },
+            sendNotificationEmail=False,
+        ).execute()
+
+    # Make it accessible to anyone with the link (editor)
+    drive.permissions().create(
+        fileId=file_id,
+        body={"type": "anyone", "role": "writer"},
+    ).execute()
+
+    return created["webViewLink"]
+
+
+@router.post("/download-pptx")
+async def download_pptx(report: Dict[str, Any] = Body(...)):
+    """
+    Build a Schumacher-branded PPTX from the generated MonthlySlidesResponse
+    and return it as a file download.
+    """
+    month = report.get("report_month", "Report")
+    filename = _safe_filename(month) + ".pptx"
+    try:
+        pptx_bytes = build_pptx(report)
+    except Exception as e:
+        logger.error("pptx_build_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"PPTX generation failed: {e}")
+
+    return Response(
+        content=pptx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/create-google-slides")
+async def create_google_slides(report: Dict[str, Any] = Body(...)):
+    """
+    Build a PPTX, upload it to Google Drive (converting to Google Slides),
+    and return the presentation URL.
+
+    Requires GOOGLE_SERVICE_ACCOUNT_JSON in .env.
+    To set up:
+      1. Create a Google Cloud project and enable the Drive API.
+      2. Create a Service Account and download its JSON key.
+      3. Paste the single-line JSON into GOOGLE_SERVICE_ACCOUNT_JSON in .env.
+      4. Optionally set GOOGLE_SLIDES_SHARE_EMAIL to auto-share with your account.
+    """
+    if not settings.google_service_account_json:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Google Drive not configured. "
+                "Set GOOGLE_SERVICE_ACCOUNT_JSON in the backend .env file. "
+                "See the API docs for setup instructions."
+            ),
+        )
+
+    month = report.get("report_month", "Report")
+    filename = _safe_filename(month)
+
+    try:
+        pptx_bytes = build_pptx(report)
+    except Exception as e:
+        logger.error("pptx_build_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"PPTX generation failed: {e}")
+
+    try:
+        url = await asyncio.get_event_loop().run_in_executor(
+            None, _upload_to_drive, pptx_bytes, filename
+        )
+        logger.info("google_slides_created", month=month, url=url)
+        return {"url": url, "filename": filename}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.")
+    except Exception as e:
+        logger.error("google_slides_upload_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Drive upload failed: {e}")

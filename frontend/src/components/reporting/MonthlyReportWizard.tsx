@@ -724,6 +724,11 @@ function Step7({
   const [error, setError] = useState("");
   const [activeSlide, setActiveSlide] = useState(1);
 
+  // Export state
+  const [slidesLoading, setSlidesLoading] = useState(false);
+  const [slidesError, setSlidesError] = useState("");
+  const [pptxLoading, setPptxLoading] = useState(false);
+
   const { start, end } = monthStartEnd(year, month);
 
   const generate = useCallback(async () => {
@@ -761,6 +766,56 @@ function Step7({
       setLoading(false);
     }
   }, [start, end, month, year, locations, keyInsights, focusAreas, attribution, initiatives]);
+
+  // ── Export handlers ──────────────────────────────────────────────────────
+  const handleOpenGoogleSlides = useCallback(async () => {
+    if (!report) return;
+    setSlidesLoading(true);
+    setSlidesError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/reports/create-google-slides`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(report),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || res.statusText);
+      }
+      const data = await res.json();
+      window.open(data.url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setSlidesError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setSlidesLoading(false);
+    }
+  }, [report]);
+
+  const handleDownloadPptx = useCallback(async () => {
+    if (!report) return;
+    setPptxLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/reports/download-pptx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(report),
+      });
+      if (!res.ok) throw new Error(res.statusText);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Schumacher Homes - ${MONTHS[month - 1]} ${year} Report.pptx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      // silent — browser will show default error
+    } finally {
+      setPptxLoading(false);
+    }
+  }, [report, month, year]);
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -854,9 +909,68 @@ function Step7({
             </button>
           </div>
 
-          <div className="flex items-center gap-2 pt-2 text-xs text-gray-400">
-            <Download className="h-3.5 w-3.5" />
-            To export: use your browser&apos;s Print → Save as PDF to capture the report as a presentation-ready PDF.
+          {/* ── Export bar ── */}
+          <div className="flex flex-col gap-3 pt-3 border-t border-gray-100">
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Google Slides */}
+              <button
+                onClick={handleOpenGoogleSlides}
+                disabled={slidesLoading}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all shadow-sm ${
+                  slidesLoading
+                    ? "bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200"
+                    : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300"
+                }`}
+              >
+                {slidesLoading ? (
+                  <><RefreshCw className="h-4 w-4 animate-spin text-[#1a2744]" /> Creating Slides...</>
+                ) : (
+                  <>
+                    {/* Google Slides icon */}
+                    <svg className="h-4 w-4" viewBox="0 0 48 48" fill="none">
+                      <rect width="48" height="48" rx="4" fill="#F9AB00"/>
+                      <path d="M12 8h24v32H12z" fill="white"/>
+                      <rect x="16" y="16" width="16" height="2.5" rx="1.25" fill="#F9AB00"/>
+                      <rect x="16" y="21" width="16" height="2.5" rx="1.25" fill="#F9AB00"/>
+                      <rect x="16" y="26" width="10" height="2.5" rx="1.25" fill="#F9AB00"/>
+                    </svg>
+                    Open in Google Slides
+                  </>
+                )}
+              </button>
+
+              {/* Download PPTX */}
+              <button
+                onClick={handleDownloadPptx}
+                disabled={pptxLoading}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all border ${
+                  pptxLoading
+                    ? "bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200"
+                    : "border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300"
+                }`}
+              >
+                {pptxLoading ? (
+                  <><RefreshCw className="h-4 w-4 animate-spin" /> Building .pptx...</>
+                ) : (
+                  <><Download className="h-4 w-4" /> Download .pptx</>
+                )}
+              </button>
+
+              <span className="text-xs text-gray-400 hidden sm:block">
+                or use browser Print → Save as PDF
+              </span>
+            </div>
+
+            {slidesError && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <strong>Google Slides:</strong> {slidesError}
+                {slidesError.includes("GOOGLE_SERVICE_ACCOUNT_JSON") && (
+                  <span className="block mt-1 text-amber-600">
+                    Set <code className="font-mono">GOOGLE_SERVICE_ACCOUNT_JSON</code> in the backend <code className="font-mono">.env</code> file with your Google Service Account key to enable this feature.
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
