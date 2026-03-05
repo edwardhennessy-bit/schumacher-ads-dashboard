@@ -1,15 +1,13 @@
 """
-pptx_builder.py — Generates a Schumacher Homes Monthly Report PPTX
-matching the dark-navy brand style from the January 2026 PowerPoint template.
+pptx_builder.py — Schumacher Homes Monthly Report PPTX
 
-All 7 slides:
-  1. Title & Agenda
-  2. Paid Media KPIs & MoM Analysis
-  3. Design Center Scorecard
-  4. Attribution & Data Integrity
-  5. Ad Development & Testing (Top Meta Creatives)
-  6. Current Initiatives & Priority Updates
-  7. Strategic Recommendations
+Matches the Single Grain presentation style:
+  • Warm off-white background (#F2F0EB)
+  • Orange/rust accent (#C4622D)
+  • Dark charcoal text (#2D2926)
+  • 70/30 split: left content + right orange panel
+  • Single Grain logo bottom-left
+  • Georgia serif headings, Calibri sans-serif body
 """
 
 from __future__ import annotations
@@ -17,728 +15,744 @@ from __future__ import annotations
 import io
 from typing import Any, Dict, List, Optional
 
-from lxml import etree
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.oxml.ns import qn
-from pptx.util import Emu, Inches, Pt
+from pptx.util import Inches, Pt
+from lxml import etree
 
-# ── Brand palette ──────────────────────────────────────────────────────────
-NAVY      = RGBColor(0x1A, 0x27, 0x44)   # Primary background
-NAVY_MID  = RGBColor(0x22, 0x35, 0x5C)   # Cards / header strip
-NAVY_CARD = RGBColor(0x1E, 0x2E, 0x52)   # Slightly lighter card bg
-GOLD      = RGBColor(0xC8, 0x9A, 0x28)   # Accent / branding
-WHITE     = RGBColor(0xFF, 0xFF, 0xFF)
-ROW_EVEN  = RGBColor(0xEB, 0xEF, 0xF9)   # Light row (even)
-ROW_ODD   = RGBColor(0xF5, 0xF7, 0xFF)   # Light row (odd)
-GREEN     = RGBColor(0x1E, 0xA7, 0x52)
-RED       = RGBColor(0xDC, 0x3A, 0x2E)
-GRAY      = RGBColor(0x94, 0xA3, 0xB8)
-AMBER     = RGBColor(0xF5, 0x9E, 0x0B)
-DARK_TEXT = RGBColor(0x1E, 0x29, 0x3C)
-BLUE_ACC  = RGBColor(0x3B, 0x82, 0xF6)
+# ─── Brand Palette ────────────────────────────────────────────────────────────
+BG       = RGBColor(0xF2, 0xF0, 0xEB)   # warm off-white slide background
+ORANGE   = RGBColor(0xC4, 0x62, 0x2D)   # primary orange/rust accent
+DARK     = RGBColor(0x2D, 0x29, 0x26)   # near-black charcoal text
+WHITE    = RGBColor(0xFF, 0xFF, 0xFF)
+GREEN    = RGBColor(0x2D, 0x7A, 0x3A)   # positive MoM / top performer
+RED      = RGBColor(0xB9, 0x1C, 0x1C)   # negative MoM / needs attention
+TEAL_G   = RGBColor(0x15, 0x60, 0x3A)   # "On Track" / "Healthy" status
+ROW_ALT  = RGBColor(0xEE, 0xEB, 0xE6)   # alternate table row background
+PEACH    = RGBColor(0xED, 0xC8, 0xB0)   # decorative circle (slides 1 & 6)
+GRAY_SUB = RGBColor(0x78, 0x74, 0x70)   # subtitle / metadata text
+GRAY_BDR = RGBColor(0xD4, 0xD0, 0xCA)   # card border
 
-# ── Slide dimensions: widescreen 16:9 ─────────────────────────────────────
-SW = Inches(13.333)
-SH = Inches(7.5)
-M  = Inches(0.42)          # Side margin
-HH = Inches(1.0)           # Header strip height
-GH = Inches(0.05)          # Gold accent line under header
-CT = HH + GH + Inches(0.18)  # Content area top
-CH = SH - CT - Inches(0.22)  # Content area height
-CW = SW - 2 * M              # Content area width
+# ─── Layout Constants ─────────────────────────────────────────────────────────
+SW = Inches(13.333)   # slide width  (16:9 widescreen)
+SH = Inches(7.5)      # slide height
+RP = Inches(9.2)      # right-panel left edge  (~69 % of width)
+RW = SW - RP          # right-panel width  (~4.13 ")
 
-FONT = "Calibri"
+# ─── Utility helpers ──────────────────────────────────────────────────────────
+
+def _to_list(val) -> List[str]:
+    """Normalise a value (string or list) to a list of non-empty strings."""
+    if isinstance(val, list):
+        out = []
+        for x in val:
+            s = str(x).strip().lstrip("-").lstrip("•").lstrip("●").strip()
+            if s:
+                out.append(s)
+        return out
+    if isinstance(val, str):
+        out = []
+        for line in val.split("\n"):
+            line = line.strip().lstrip("-").lstrip("•").lstrip("●").strip()
+            if line:
+                out.append(line)
+        return out
+    return []
 
 
-# ── Low-level helpers ──────────────────────────────────────────────────────
+def _get_slide_content(report: Dict, slide_number: int) -> Dict:
+    """Return the content dict for the requested slide number."""
+    for s in report.get("slides", []):
+        if s.get("slide_number") == slide_number:
+            return s.get("content", {})
+    return {}
 
-def _rgb_hex(color: RGBColor) -> str:
-    return f"{color.r:02X}{color.g:02X}{color.b:02X}"
 
+def _status_color(status: str) -> RGBColor:
+    s = str(status).lower()
+    if any(x in s for x in ("on track", "healthy", "complete")):
+        return TEAL_G
+    if "monitor" in s:
+        return ORANGE
+    return ORANGE   # "in progress" etc.
+
+
+# ─── Low-level drawing primitives ─────────────────────────────────────────────
 
 def _blank_slide(prs: Presentation):
-    """Add a blank slide with the navy background."""
-    blank = None
-    for layout in prs.slide_layouts:
-        if "blank" in layout.name.lower():
-            blank = layout
-            break
-    if blank is None:
-        blank = prs.slide_layouts[6]
+    """Add a blank slide and fill the background with BG colour."""
+    blank = next(
+        (l for l in prs.slide_layouts if l.name.lower() == "blank"),
+        prs.slide_layouts[-1],
+    )
     slide = prs.slides.add_slide(blank)
     bg = slide.background
-    bg.fill.solid()
-    bg.fill.fore_color.rgb = NAVY
+    fill = bg.fill
+    fill.solid()
+    fill.fore_color.rgb = BG
     return slide
 
 
-def _box(slide, l, t, w, h, fill: RGBColor, alpha=None):
-    """Add a filled rectangle with no border."""
+def _box(slide, l, t, w, h,
+         fill_color: Optional[RGBColor] = None,
+         line_color: Optional[RGBColor] = None,
+         line_pt: float = 0.5):
+    """Add a rectangle shape with optional fill and border."""
     shape = slide.shapes.add_shape(1, l, t, w, h)   # 1 = Rectangle
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = fill
-    shape.line.fill.background()  # no border
+    if fill_color:
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = fill_color
+    else:
+        shape.fill.background()
+    if line_color:
+        shape.line.color.rgb = line_color
+        shape.line.width = Pt(line_pt)
+    else:
+        shape.line.fill.background()
     return shape
 
 
-def _txtbox(slide, text: str, l, t, w, h,
-            size: int = 11, bold: bool = False,
-            color: RGBColor = WHITE, align=PP_ALIGN.LEFT,
-            italic: bool = False, wrap: bool = True):
-    """Add a text box with a single paragraph."""
+def _oval(slide, l, t, w, h, fill_color: RGBColor):
+    """Add a filled oval/circle."""
+    shape = slide.shapes.add_shape(9, l, t, w, h)   # 9 = Oval
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = fill_color
+    shape.line.fill.background()
+    return shape
+
+
+def _txt(slide, text: str, l, t, w, h,
+         size: float = 11,
+         bold: bool = False,
+         italic: bool = False,
+         color: RGBColor = DARK,
+         align: PP_ALIGN = PP_ALIGN.LEFT,
+         font: str = "Calibri",
+         wrap: bool = True):
+    """Add a single-run text box."""
     txb = slide.shapes.add_textbox(l, t, w, h)
     tf = txb.text_frame
     tf.word_wrap = wrap
     p = tf.paragraphs[0]
     p.alignment = align
     run = p.add_run()
-    run.text = text
+    run.text = str(text)
     run.font.size = Pt(size)
     run.font.bold = bold
     run.font.italic = italic
     run.font.color.rgb = color
-    run.font.name = FONT
+    run.font.name = font
     return txb
 
 
-def _multi_txtbox(slide, lines: List[str], l, t, w, h,
-                  size: int = 10, bold: bool = False,
-                  color: RGBColor = WHITE, align=PP_ALIGN.LEFT,
-                  bullet: bool = False, line_spacing_pt: float = 2.0):
-    """Add a text box with one paragraph per line."""
-    txb = slide.shapes.add_textbox(l, t, w, h)
-    tf = txb.text_frame
-    tf.word_wrap = True
-    for i, line in enumerate(lines):
-        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-        p.alignment = align
-        p.space_before = Pt(line_spacing_pt)
-        run = p.add_run()
-        run.text = ("• " if bullet else "") + str(line)
-        run.font.size = Pt(size)
-        run.font.bold = bold
-        run.font.color.rgb = color
-        run.font.name = FONT
-    return txb
+# ─── Reusable slide components ────────────────────────────────────────────────
+
+def _sg_logo(slide):
+    """Single Grain logo — orange flame oval + 'SINGLE GRAIN' text."""
+    _oval(slide, Inches(0.28), SH - Inches(0.52), Inches(0.3), Inches(0.38), ORANGE)
+    _txt(slide, "SINGLE GRAIN",
+         Inches(0.65), SH - Inches(0.44),
+         Inches(1.6), Inches(0.3),
+         size=7.5, color=DARK, font="Calibri")
 
 
-def _cell_fill(cell, color: RGBColor):
-    """Set a table cell's solid fill via XML."""
-    tc = cell._tc
-    tcPr = tc.get_or_add_tcPr()
-    for tag in (qn("a:solidFill"), qn("a:noFill"), qn("a:gradFill"), qn("a:pattFill")):
-        for el in tcPr.findall(tag):
-            tcPr.remove(el)
-    sf = etree.SubElement(tcPr, qn("a:solidFill"))
-    etree.SubElement(sf, qn("a:srgbClr"), val=_rgb_hex(color))
-    # Set cell margins
-    tcPr.set("marT", str(int(Pt(2.5))))
-    tcPr.set("marB", str(int(Pt(2.5))))
-    tcPr.set("marL", str(int(Pt(4))))
-    tcPr.set("marR", str(int(Pt(4))))
+def _stat_bar(slide, stats: List[tuple], x=None, y=None, w=None, h=None):
+    """Orange stat bar.  stats = [(label, value), ...]"""
+    x = x if x is not None else Inches(0.4)
+    y = y if y is not None else Inches(1.1)
+    w = w if w is not None else (RP - Inches(0.8))
+    h = h if h is not None else Inches(0.82)
+    _box(slide, x, y, w, h, fill_color=ORANGE)
+    col_w = w / len(stats)
+    for i, (label, value) in enumerate(stats):
+        cx = x + col_w * i
+        _txt(slide, label,
+             cx + Inches(0.05), y + Inches(0.06),
+             col_w - Inches(0.05), Inches(0.22),
+             size=8.5, color=WHITE, align=PP_ALIGN.CENTER, font="Calibri")
+        _txt(slide, str(value),
+             cx, y + Inches(0.28),
+             col_w, Inches(0.46),
+             size=22, bold=True, color=WHITE, align=PP_ALIGN.CENTER, font="Calibri")
 
 
-def _cell_text(cell, text: str, font_size: int = 9, bold: bool = False,
-               color: RGBColor = DARK_TEXT, align=PP_ALIGN.LEFT):
-    """Set table cell text with styling."""
-    tf = cell.text_frame
-    tf.word_wrap = True
-    p = tf.paragraphs[0]
-    p.alignment = align
-    # Remove any existing runs
-    for r in list(p.runs):
-        p._p.remove(r._r)
-    if str(text):
-        run = p.add_run()
-        run.text = str(text)
-        run.font.size = Pt(font_size)
-        run.font.bold = bold
-        run.font.name = FONT
-        run.font.color.rgb = color
-
-
-def _header(slide, title: str, subtitle: str = ""):
-    """Standard slide header: navy strip → gold line → white title."""
-    _box(slide, 0, 0, SW, HH, NAVY_MID)
-    _box(slide, 0, HH, SW, GH, GOLD)
-    # Schumacher branding (top-left small text)
-    _txtbox(slide, "SCHUMACHER HOMES",
-            M, Inches(0.12), Inches(5), Inches(0.28),
-            size=8, bold=True, color=GOLD)
-    # Main title
-    _txtbox(slide, title,
-            M, Inches(0.4), SW - 2 * M, Inches(0.52),
-            size=22, bold=True, color=WHITE)
-    # Subtitle
+def _slide_header(slide, title: str, subtitle: str = ""):
+    """Large bold title + optional grey subtitle line."""
+    _txt(slide, title,
+         Inches(0.4), Inches(0.15),
+         RP - Inches(0.5), Inches(0.65),
+         size=28, bold=True, color=DARK, font="Georgia")
     if subtitle:
-        _txtbox(slide, subtitle,
-                M, Inches(0.76), SW - 2 * M, Inches(0.26),
-                size=8, color=GRAY)
+        _txt(slide, subtitle,
+             Inches(0.4), Inches(0.75),
+             RP - Inches(0.5), Inches(0.26),
+             size=9.5, color=GRAY_SUB, font="Calibri")
 
 
-def _stat_card(slide, label: str, value: str, l, t, w, h=Inches(0.72)):
-    """Small metric stat card."""
-    _box(slide, l, t, w, h, NAVY_CARD)
-    _txtbox(slide, value,
-            l + Inches(0.08), t + Inches(0.05),
-            w - Inches(0.16), h * 0.55,
-            size=18, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
-    _txtbox(slide, label,
-            l, t + h * 0.58,
-            w, h * 0.38,
-            size=7, color=GRAY, align=PP_ALIGN.CENTER)
+def _right_panel(slide, title1: str, bullets1: List[str],
+                 title2: str = "", bullets2: List[str] = None):
+    """Draw the standard orange right panel with one or two bullet sections."""
+    bullets2 = bullets2 or []
+    _box(slide, RP, Inches(0), RW, SH, fill_color=ORANGE)
+
+    y = Inches(0.42)
+
+    def _section(header, items):
+        nonlocal y
+        _txt(slide, header,
+             RP + Inches(0.18), y,
+             RW - Inches(0.28), Inches(0.55),
+             size=19, bold=True, color=WHITE,
+             align=PP_ALIGN.CENTER, font="Georgia")
+        y += Inches(0.6)
+        for item in items:
+            _oval(slide,
+                  RP + Inches(0.15), y + Inches(0.07),
+                  Inches(0.09), Inches(0.09), WHITE)
+            _txt(slide, item,
+                 RP + Inches(0.32), y,
+                 RW - Inches(0.46), Inches(0.95),
+                 size=9.5, color=WHITE, font="Calibri", wrap=True)
+            y += Inches(0.95)
+        y += Inches(0.08)
+
+    _section(title1, bullets1)
+    if title2:
+        _section(title2, bullets2)
 
 
-# ── Slide 1: Title & Agenda ────────────────────────────────────────────────
+# ─── Slide builders ───────────────────────────────────────────────────────────
 
-def _slide1(prs: Presentation, content: Dict[str, Any]):
+def _slide1(prs: Presentation, report: Dict):
+    """Slide 1 — Agenda."""
     slide = _blank_slide(prs)
+    c = _get_slide_content(report, 1)
+    month = report.get("report_month", "Monthly Report")
 
-    # Top brand strip
-    _box(slide, 0, 0, SW, Inches(0.5), NAVY_MID)
-    _box(slide, 0, Inches(0.5), SW, Inches(0.05), GOLD)
-    _txtbox(slide, "SCHUMACHER HOMES",
-            M, Inches(0.1), Inches(7), Inches(0.32),
-            size=10, bold=True, color=GOLD)
-    _txtbox(slide, "MONTHLY PERFORMANCE REPORT",
-            0, Inches(0.12), SW - M, Inches(0.28),
-            size=9, color=GRAY, align=PP_ALIGN.RIGHT)
+    # Large decorative peach circle — top right, partially off-screen
+    _oval(slide, Inches(9.6), Inches(-1.8), Inches(5.8), Inches(5.8), PEACH)
 
-    # Main headline
-    headline = content.get("headline", "Monthly Report")
-    _txtbox(slide, headline,
-            M, Inches(1.5), SW - 2 * M, Inches(1.5),
-            size=42, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
+    # Title
+    _txt(slide, month,
+         Inches(0.5), Inches(2.0), Inches(5.6), Inches(0.9),
+         size=36, bold=True, color=DARK, font="Georgia")
 
-    # Gold divider
-    _box(slide, M, Inches(3.2), SW - 2 * M, Inches(0.04), GOLD)
+    # "Agenda ●" — two-run textbox
+    txb = slide.shapes.add_textbox(Inches(0.5), Inches(2.88), Inches(5.6), Inches(0.9))
+    tf = txb.text_frame
+    tf.word_wrap = False
+    p = tf.paragraphs[0]
+    r1 = p.add_run()
+    r1.text = "Agenda "
+    r1.font.size = Pt(40)
+    r1.font.bold = True
+    r1.font.color.rgb = DARK
+    r1.font.name = "Georgia"
+    r2 = p.add_run()
+    r2.text = "●"
+    r2.font.size = Pt(28)
+    r2.font.bold = False
+    r2.font.color.rgb = ORANGE
+    r2.font.name = "Calibri"
 
-    # AGENDA label
-    _txtbox(slide, "AGENDA",
-            M, Inches(3.4), SW - 2 * M, Inches(0.38),
-            size=11, bold=True, color=GOLD, align=PP_ALIGN.CENTER)
+    # Dashed divider line
+    _box(slide, Inches(0.5), Inches(3.88), Inches(5.5), Pt(1.5), fill_color=GRAY_SUB)
 
-    # Agenda items
-    agenda = content.get("agenda", [])
-    item_h = Inches(0.56)
-    for i, item in enumerate(agenda):
-        iy = Inches(3.9) + i * item_h
-        _box(slide, M, iy + Inches(0.04), Inches(0.36), Inches(0.36), GOLD)
-        _txtbox(slide, str(i + 1),
-                M + Inches(0.01), iy + Inches(0.02),
-                Inches(0.34), Inches(0.4),
-                size=14, bold=True, color=NAVY, align=PP_ALIGN.CENTER)
-        _txtbox(slide, item,
-                M + Inches(0.48), iy + Inches(0.1),
-                CW - Inches(0.48), Inches(0.38),
-                size=13, color=WHITE)
+    # Agenda items — right column with orange arrows
+    agenda = c.get("agenda", [
+        "Performance Reporting & Data Integrity.",
+        "Ad Development & Testing.",
+        "Priority Updates / New Business.",
+    ])
+    y = Inches(2.25)
+    for item in agenda:
+        _txt(slide, "➤",
+             Inches(6.5), y, Inches(0.35), Inches(0.55),
+             size=14, color=ORANGE, font="Calibri")
+        _txt(slide, item,
+             Inches(6.92), y, Inches(5.9), Inches(0.65),
+             size=14, bold=True, color=DARK, font="Georgia", wrap=True)
+        y += Inches(1.05)
+
+    _sg_logo(slide)
+    return slide
 
 
-# ── Slide 2: KPIs & MoM Analysis ──────────────────────────────────────────
-
-def _slide2(prs: Presentation, content: Dict[str, Any]):
+def _slide2(prs: Presentation, report: Dict):
+    """Slide 2 — Paid Media KPIs & MoM Analysis."""
     slide = _blank_slide(prs)
-    _header(slide, "Paid Media KPIs & MoM Analysis",
-            content.get("subtitle", ""))
+    c = _get_slide_content(report, 2)
+    month = report.get("report_month", "Monthly")
 
-    stats = content.get("summary_stats", {})
-    curr_label = content.get("curr_month_label", "Current Month")
-    prev_label = content.get("prev_month_label", "Prior Month")
+    prev_label  = c.get("prev_month_label", "Prior Month")
+    curr_label  = c.get("curr_month_label", month)
+    stats_raw   = c.get("summary_stats", {})
+    total_spend = stats_raw.get("total_spend", 0)
+    total_leads = stats_raw.get("total_leads", 0)
+    blended_cpl = stats_raw.get("blended_cpl", 0)
 
-    # Stat row
-    stat_items = [
-        ("Total Leads",  f"{stats.get('total_leads', 0):,}"),
-        ("Blended CPL",  f"${stats.get('blended_cpl', 0):,.2f}"),
-        ("Total Spend",  f"${stats.get('total_spend', 0):,.0f}"),
-    ]
-    sw3 = (CW - Inches(0.2)) / 3
-    for i, (lbl, val) in enumerate(stat_items):
-        _stat_card(slide, lbl, val,
-                   M + i * (sw3 + Inches(0.1)), CT, sw3)
+    _slide_header(slide, "Paid Media KPIs & MoM Analysis",
+                  f"Ad Platform Data  |  {curr_label}  |  32 Locations")
+
+    _stat_bar(slide, [
+        ("Total Spend", f"${total_spend:,.0f}"),
+        ("Leads",       f"{total_leads:,}"),
+        ("Avg CPL",     f"${blended_cpl:,.2f}"),
+    ], y=Inches(1.08))
 
     # MoM table
-    mom_rows = content.get("mom_table", [])
-    tbl_top = CT + Inches(0.88)
-    tbl_h = SH - tbl_top - Inches(1.5) - Inches(0.22)
-
+    mom_rows = c.get("mom_table", [])
     if mom_rows:
-        headers = [" Metric", prev_label, curr_label, "Change", ""]
-        col_ws = [Inches(3.2), Inches(2.0), Inches(2.1), Inches(1.6), Inches(0.5)]
-        total_w = sum(col_ws)
-        tbl = slide.shapes.add_table(
-            len(mom_rows) + 1, len(headers),
-            M, tbl_top, total_w, tbl_h
-        ).table
-        for ci, cw in enumerate(col_ws):
-            tbl.columns[ci].width = cw
+        tx      = Inches(0.4)
+        ty      = Inches(2.08)
+        cw_list = [Inches(2.35), Inches(1.55), Inches(1.55), Inches(1.45), Inches(0.38)]
+        row_h   = Inches(0.305)
+        total_w = sum(cw_list)
+        headers = ["Metric", prev_label, curr_label, "MoM Change", ""]
 
-        # Header row
-        for ci, hdr in enumerate(headers):
-            cell = tbl.cell(0, ci)
-            _cell_fill(cell, NAVY_MID)
-            _cell_text(cell, hdr, 9, True, WHITE,
-                       PP_ALIGN.LEFT if ci == 0 else PP_ALIGN.CENTER)
+        _box(slide, tx, ty, total_w, row_h, fill_color=ORANGE)
+        cx = tx
+        for hdr, cw in zip(headers, cw_list):
+            _txt(slide, hdr, cx + Inches(0.04), ty + Inches(0.04),
+                 cw - Inches(0.04), row_h,
+                 size=8.5, bold=True, color=WHITE, align=PP_ALIGN.CENTER, font="Calibri")
+            cx += cw
 
-        # Data rows
         for ri, row in enumerate(mom_rows):
-            bg = ROW_EVEN if ri % 2 == 0 else ROW_ODD
-            direction = row.get("direction", "")
-            change = row.get("change", "N/A")
-            invert = row.get("invert", False)
-            # Positive direction: ▲ is good unless invert
+            ry = ty + row_h * (ri + 1)
+            _box(slide, tx, ry, total_w, row_h,
+                 fill_color=WHITE if ri % 2 == 0 else ROW_ALT)
+
+            change    = str(row.get("change", ""))
+            direction = str(row.get("direction", ""))
+            invert    = row.get("invert", False)
+
             if direction == "▲":
-                change_col = RED if invert else GREEN
+                chg_color = RED if invert else GREEN
             elif direction == "▼":
-                change_col = GREEN if invert else RED
+                chg_color = GREEN if invert else RED
             else:
-                change_col = DARK_TEXT
+                chg_color = DARK
 
-            row_data = [
-                (f" {row.get('metric','')}", DARK_TEXT, PP_ALIGN.LEFT, False),
-                (row.get("prev", ""),        DARK_TEXT, PP_ALIGN.CENTER, False),
-                (row.get("curr", ""),        DARK_TEXT, PP_ALIGN.CENTER, True),
-                (f"{direction} {change}",   change_col, PP_ALIGN.CENTER, True),
-                ("",                         DARK_TEXT, PP_ALIGN.CENTER, False),
-            ]
-            for ci, (txt, col, al, bd) in enumerate(row_data):
-                cell = tbl.cell(ri + 1, ci)
-                _cell_fill(cell, bg)
-                _cell_text(cell, txt, 8, bd, col, al)
+            vals   = [row.get("metric",""), row.get("prev",""), row.get("curr",""), change, direction]
+            colors = [DARK, DARK, DARK, chg_color, chg_color]
+            aligns = [PP_ALIGN.LEFT, PP_ALIGN.CENTER, PP_ALIGN.CENTER,
+                      PP_ALIGN.CENTER, PP_ALIGN.CENTER]
+            bolds  = [True, False, False, True, False]
 
-    # Key takeaways strip
-    takeaways = content.get("key_takeaways", "")
-    if takeaways:
-        ta_top = SH - Inches(1.42)
-        _box(slide, M, ta_top, CW, Inches(1.18), NAVY_MID)
-        _txtbox(slide, "KEY TAKEAWAYS",
-                M + Inches(0.12), ta_top + Inches(0.08),
-                Inches(2.5), Inches(0.24),
-                size=8, bold=True, color=GOLD)
-        lines = [l.strip().lstrip("- ") for l in takeaways.split("\n") if l.strip()][:3]
-        _multi_txtbox(slide, lines,
-                      M + Inches(0.12), ta_top + Inches(0.3),
-                      CW - Inches(0.24), Inches(0.82),
-                      size=8, color=WHITE, bullet=True, line_spacing_pt=1.5)
+            cx = tx
+            for val, col, al, bld, cw in zip(vals, colors, aligns, bolds, cw_list):
+                _txt(slide, str(val), cx + Inches(0.04), ry + Inches(0.04),
+                     cw - Inches(0.04), row_h - Inches(0.04),
+                     size=9, bold=bld, color=col, align=al, font="Calibri")
+                cx += cw
 
+    _right_panel(slide,
+                 "Key Takeaways",
+                 _to_list(c.get("key_takeaways", [])),
+                 "Next Steps",
+                 _to_list(c.get("next_steps", [])))
 
-# ── Slide 3: Design Center Scorecard ──────────────────────────────────────
-
-def _slide3(prs: Presentation, content: Dict[str, Any]):
-    slide = _blank_slide(prs)
-    _header(slide, "Design Center Scorecard",
-            content.get("subtitle", ""))
-
-    stats = content.get("summary_stats", {})
-
-    # 6-stat row
-    stat_items = [
-        ("Total Leads",   f"{stats.get('total_leads', 0):,}"),
-        ("Avg CPL",       f"${stats.get('avg_cpl', 0):,.2f}"),
-        ("Total Visits",  f"{stats.get('total_visits', 0):,}"),
-        ("Quotes",        f"{stats.get('total_quotes', 0):,}"),
-        ("Cost / Visit",  f"${stats.get('cost_per_visit', 0):,.2f}"),
-        ("Total Spend",   f"${stats.get('total_spend', 0):,.0f}"),
-    ]
-    sw6 = (CW - Inches(0.25)) / 6
-    for i, (lbl, val) in enumerate(stat_items):
-        _stat_card(slide, lbl, val,
-                   M + i * (sw6 + Inches(0.05)), CT, sw6,
-                   h=Inches(0.65))
-
-    # Location table
-    all_locs = content.get("all_locations", [])
-    tbl_top = CT + Inches(0.8)
-    tbl_h = SH - tbl_top - Inches(0.22)
-
-    # If we have key insights, shrink the table to make room
-    insights = content.get("key_insights", "")
-    if insights:
-        tbl_h = SH - tbl_top - Inches(1.35) - Inches(0.22)
-
-    if all_locs:
-        rows_to_show = all_locs[:14]
-        headers = [" Location", "Leads", "Visits", "CPL ($)", "Quotes", "Spend ($)"]
-        col_ws = [Inches(3.6), Inches(1.35), Inches(1.35), Inches(1.55), Inches(1.3), Inches(1.8)]
-        tbl = slide.shapes.add_table(
-            len(rows_to_show) + 1, len(headers),
-            M, tbl_top, sum(col_ws), tbl_h
-        ).table
-        for ci, cw in enumerate(col_ws):
-            tbl.columns[ci].width = cw
-
-        for ci, hdr in enumerate(headers):
-            cell = tbl.cell(0, ci)
-            _cell_fill(cell, NAVY_MID)
-            _cell_text(cell, hdr, 9, True, WHITE,
-                       PP_ALIGN.LEFT if ci == 0 else PP_ALIGN.CENTER)
-
-        for ri, loc in enumerate(rows_to_show):
-            bg = ROW_EVEN if ri % 2 == 0 else ROW_ODD
-            cpl = loc.get("cpl", 0)
-            cpl_col = GREEN if cpl < 100 else (RED if cpl > 175 else DARK_TEXT)
-            cells = [
-                (f" {loc.get('location','')}", DARK_TEXT, PP_ALIGN.LEFT),
-                (f"{loc.get('leads', 0):,}",   DARK_TEXT, PP_ALIGN.CENTER),
-                (f"{loc.get('visits', 0):,}",  DARK_TEXT, PP_ALIGN.CENTER),
-                (f"${cpl:,.2f}",                cpl_col,  PP_ALIGN.CENTER),
-                (f"{loc.get('quotes', 0):,}",  DARK_TEXT, PP_ALIGN.CENTER),
-                (f"${loc.get('spend', 0):,.0f}", DARK_TEXT, PP_ALIGN.CENTER),
-            ]
-            for ci, (txt, col, al) in enumerate(cells):
-                cell = tbl.cell(ri + 1, ci)
-                _cell_fill(cell, bg)
-                _cell_text(cell, txt, 8, False, col, al)
-
-    # Key insights strip
-    if insights:
-        ins_top = SH - Inches(1.32)
-        _box(slide, M, ins_top, CW, Inches(1.1), NAVY_MID)
-        _txtbox(slide, "KEY INSIGHTS",
-                M + Inches(0.12), ins_top + Inches(0.08),
-                Inches(2.5), Inches(0.24),
-                size=8, bold=True, color=GOLD)
-        lines = [l.strip().lstrip("- ") for l in insights.split("\n") if l.strip()][:3]
-        _multi_txtbox(slide, lines,
-                      M + Inches(0.12), ins_top + Inches(0.3),
-                      CW - Inches(0.24), Inches(0.72),
-                      size=8, color=WHITE, bullet=True, line_spacing_pt=1.5)
-
-
-# ── Slide 4: Attribution & Data Integrity ─────────────────────────────────
-
-def _slide4(prs: Presentation, content: Dict[str, Any]):
-    slide = _blank_slide(prs)
-    _header(slide, "Attribution & Data Integrity",
-            "HubSpot & Platform Sync Status")
-
-    sync = content.get("hubspot_sync", {})
-    status_colors = {
-        "On Track":  GREEN,
-        "In Progress": AMBER,
-        "Off Track": RED,
-        "N/A": GRAY,
-    }
-
-    # Platform sync pills
-    _txtbox(slide, "HUBSPOT SYNC STATUS",
-            M, CT + Inches(0.05), CW, Inches(0.28),
-            size=9, bold=True, color=GOLD)
-
-    platforms = [
-        ("Google Ads → HubSpot",  sync.get("google_status",    "In Progress")),
-        ("Meta → HubSpot",        sync.get("meta_status",      "In Progress")),
-        ("Microsoft → HubSpot",   sync.get("microsoft_status", "In Progress")),
-    ]
-    pill_w = (CW - Inches(0.2)) / 3
-    for i, (lbl, status) in enumerate(platforms):
-        px = M + i * (pill_w + Inches(0.1))
-        py = CT + Inches(0.35)
-        _box(slide, px, py, pill_w, Inches(0.58), NAVY_CARD)
-        _txtbox(slide, lbl,
-                px + Inches(0.1), py + Inches(0.06),
-                pill_w - Inches(0.2), Inches(0.24),
-                size=8, color=WHITE)
-        sc = status_colors.get(status, GRAY)
-        _txtbox(slide, f"● {status}",
-                px + Inches(0.1), py + Inches(0.3),
-                pill_w - Inches(0.2), Inches(0.24),
-                size=10, bold=True, color=sc)
-
-    # Attribution accuracy table
-    acc_rows = content.get("accuracy_table", [])
-    if acc_rows:
-        _txtbox(slide, "ATTRIBUTION ACCURACY",
-                M, CT + Inches(1.15), CW, Inches(0.28),
-                size=9, bold=True, color=GOLD)
-        headers = ["Metric", "Platform", "HubSpot", "Variance", "Accuracy", "On Target"]
-        col_ws = [Inches(2.0), Inches(1.8), Inches(1.8), Inches(2.5), Inches(1.5), Inches(1.5)]
-        tbl = slide.shapes.add_table(
-            len(acc_rows) + 1, len(headers),
-            M, CT + Inches(1.45), sum(col_ws), Inches(0.88)
-        ).table
-        for ci, cw in enumerate(col_ws):
-            tbl.columns[ci].width = cw
-        for ci, hdr in enumerate(headers):
-            cell = tbl.cell(0, ci)
-            _cell_fill(cell, NAVY_MID)
-            _cell_text(cell, hdr, 9, True, WHITE,
-                       PP_ALIGN.LEFT if ci == 0 else PP_ALIGN.CENTER)
-        for ri, row in enumerate(acc_rows):
-            bg = ROW_EVEN if ri % 2 == 0 else ROW_ODD
-            on_target = row.get("on_target")
-            tgt_txt = "✓" if on_target is True else ("✗" if on_target is False else "—")
-            tgt_col = GREEN if on_target is True else (RED if on_target is False else GRAY)
-            row_data = [
-                (row.get("metric",""),    DARK_TEXT, PP_ALIGN.LEFT),
-                (str(row.get("platform","—")), DARK_TEXT, PP_ALIGN.CENTER),
-                (str(row.get("hubspot","—")),  DARK_TEXT, PP_ALIGN.CENTER),
-                (str(row.get("variance","—")), DARK_TEXT, PP_ALIGN.CENTER),
-                (str(row.get("accuracy","—")), DARK_TEXT, PP_ALIGN.CENTER),
-                (tgt_txt,                 tgt_col,  PP_ALIGN.CENTER),
-            ]
-            for ci, (txt, col, al) in enumerate(row_data):
-                cell = tbl.cell(ri + 1, ci)
-                _cell_fill(cell, bg)
-                _cell_text(cell, txt, 9, ci == 5, col, al)
-
-    # Other tracking + action items (two-column)
-    y2 = CT + Inches(2.5)
-    left_w = CW * 0.45
-    right_x = M + CW * 0.52
-
-    # Other tracking
-    _txtbox(slide, "OTHER TRACKING STATUS",
-            M, y2, left_w, Inches(0.28),
-            size=9, bold=True, color=GOLD)
-    other = [
-        ("PMax",         content.get("pmax_status",        "—")),
-        ("Meta Pixel",   content.get("meta_pixel_status",  "Healthy")),
-        ("Lead Scoring", content.get("lead_scoring_status","In Progress")),
-    ]
-    for i, (lbl, val) in enumerate(other):
-        oy = y2 + Inches(0.32) + i * Inches(0.42)
-        _box(slide, M, oy, left_w, Inches(0.38), NAVY_CARD)
-        sc = status_colors.get(val, GRAY)
-        _txtbox(slide, f"{lbl}:",
-                M + Inches(0.1), oy + Inches(0.08),
-                Inches(1.4), Inches(0.26),
-                size=8, bold=True, color=GRAY)
-        _txtbox(slide, val,
-                M + Inches(1.5), oy + Inches(0.08),
-                left_w - Inches(1.6), Inches(0.26),
-                size=8, bold=True, color=sc)
-
-    # Action items
-    action_items = content.get("action_items", [])
-    if action_items:
-        _txtbox(slide, "ACTION ITEMS",
-                right_x, y2, CW * 0.46, Inches(0.28),
-                size=9, bold=True, color=GOLD)
-        _multi_txtbox(slide, action_items[:6],
-                      right_x, y2 + Inches(0.32),
-                      CW * 0.46, Inches(1.8),
-                      size=9, color=WHITE, bullet=True)
-
-
-# ── Slide 5: Ad Development & Testing ─────────────────────────────────────
-
-def _slide5(prs: Presentation, content: Dict[str, Any]):
-    slide = _blank_slide(prs)
-    _header(slide, "Ad Development & Testing",
-            content.get("subtitle", "Top Performing Meta Creatives"))
-
-    creatives = content.get("creatives", [])[:6]
-    if not creatives:
-        _txtbox(slide, "No creative data available for this period.",
-                M, CT + Inches(1.5), CW, Inches(0.4),
-                size=13, color=GRAY, align=PP_ALIGN.CENTER)
-        return slide
-
-    cols = 3
-    num_rows = (len(creatives) + cols - 1) // cols
-    card_w = (CW - Inches(0.3)) / cols
-    card_h = (CH - Inches(0.1)) / max(num_rows, 2)
-
-    accent_colors = [GOLD, BLUE_ACC, GREEN, AMBER, RED, GRAY]
-
-    for i, c in enumerate(creatives):
-        col = i % cols
-        row = i // cols
-        cx = M + col * (card_w + Inches(0.15))
-        cy = CT + Inches(0.1) + row * (card_h + Inches(0.12))
-        acc = accent_colors[i % len(accent_colors)]
-
-        # Card bg
-        _box(slide, cx, cy, card_w, card_h, NAVY_CARD)
-        # Top accent stripe
-        _box(slide, cx, cy, card_w, Inches(0.06), acc)
-
-        # Rank badge
-        _box(slide, cx + Inches(0.12), cy + Inches(0.12),
-             Inches(0.3), Inches(0.3), acc)
-        _txtbox(slide, f"#{i+1}",
-                cx + Inches(0.12), cy + Inches(0.09),
-                Inches(0.3), Inches(0.34),
-                size=9, bold=True, color=NAVY, align=PP_ALIGN.CENTER)
-
-        # Ad name
-        ad_name = (c.get("ad_name") or "Unknown Ad")[:55]
-        _txtbox(slide, ad_name,
-                cx + Inches(0.5), cy + Inches(0.14),
-                card_w - Inches(0.62), Inches(0.44),
-                size=8, bold=True, color=WHITE, wrap=True)
-
-        # Campaign name
-        campaign = (c.get("campaign_name") or "")[:42]
-        if campaign:
-            _txtbox(slide, campaign,
-                    cx + Inches(0.12), cy + Inches(0.6),
-                    card_w - Inches(0.24), Inches(0.22),
-                    size=7, color=GRAY, italic=True)
-
-        # Metric grid
-        leads = c.get("leads", 0)
-        spend = c.get("spend", 0)
-        cpl   = c.get("cpl")
-        ctr   = c.get("ctr", 0)
-
-        metrics = [
-            ("Leads",  f"{leads:,}",                     GREEN),
-            ("Spend",  f"${spend:,.0f}",                 WHITE),
-            ("CPL",    f"${cpl:,.2f}" if cpl else "—",   WHITE),
-            ("CTR",    f"{ctr}%",                         WHITE),
-        ]
-        mw = card_w / len(metrics)
-        my = cy + card_h - Inches(0.78)
-        for mi, (mlbl, mval, mcol) in enumerate(metrics):
-            mx = cx + mi * mw
-            _txtbox(slide, mval,
-                    mx, my, mw, Inches(0.32),
-                    size=10, bold=True, color=mcol, align=PP_ALIGN.CENTER)
-            _txtbox(slide, mlbl,
-                    mx, my + Inches(0.3), mw, Inches(0.22),
-                    size=7, color=GRAY, align=PP_ALIGN.CENTER)
-
+    _sg_logo(slide)
     return slide
 
 
-# ── Slide 6: Current Initiatives ──────────────────────────────────────────
-
-def _slide6(prs: Presentation, content: Dict[str, Any]):
+def _slide3(prs: Presentation, report: Dict):
+    """Slide 3 — Design Center Scorecard."""
     slide = _blank_slide(prs)
-    _header(slide, "Current Initiatives & Priority Updates")
+    c = _get_slide_content(report, 3)
+    month = report.get("report_month", "Monthly")
 
-    initiatives = content.get("initiatives", [])
-    if not initiatives:
-        _txtbox(slide, "No initiatives provided.",
-                M, CT + Inches(1.5), CW, Inches(0.4),
-                size=13, color=GRAY, align=PP_ALIGN.CENTER)
-        return slide
+    stats_raw = c.get("summary_stats", {})
+    _slide_header(slide, "Design Center Scorecard",
+                  f"HubSpot Data  |  {month}  |  32 Locations")
 
-    max_items = min(len(initiatives), 10)
-    use_cols = max_items > 5
-    col_count = 2 if use_cols else 1
-    col_w = (CW - (Inches(0.2) if use_cols else 0)) / col_count
-    item_h = Inches(0.65)
+    _stat_bar(slide, [
+        ("Leads",   f"{stats_raw.get('total_leads', 0):,}"),
+        ("Avg CPL", f"${stats_raw.get('avg_cpl', 0):,.2f}"),
+        ("Visits",  f"{stats_raw.get('total_visits', 0):,}"),
+        ("Quotes",  f"{stats_raw.get('total_quotes', 0):,}"),
+    ], y=Inches(1.08))
 
-    for i, initiative in enumerate(initiatives[:max_items]):
-        col = i % 2 if use_cols else 0
-        row = i // 2 if use_cols else i
-        ix = M + col * (col_w + Inches(0.2))
-        iy = CT + Inches(0.12) + row * (item_h + Inches(0.08))
+    def _loc_table(section_title: str, rows: List[Dict], y_start, accent: RGBColor):
+        # Accent bar + section title
+        _box(slide, Inches(0.4), y_start, Inches(0.06), Inches(0.32), fill_color=accent)
+        _txt(slide, section_title,
+             Inches(0.54), y_start, Inches(7.5), Inches(0.32),
+             size=10.5, bold=True, color=accent, font="Georgia")
 
-        _box(slide, ix, iy, col_w, item_h, NAVY_CARD)
-        # Number box
-        _box(slide, ix, iy, Inches(0.44), item_h, GOLD)
-        _txtbox(slide, str(i + 1),
-                ix + Inches(0.01), iy + Inches(0.15),
-                Inches(0.42), Inches(0.38),
-                size=15, bold=True, color=NAVY, align=PP_ALIGN.CENTER)
-        # Text
-        _txtbox(slide, initiative,
-                ix + Inches(0.54), iy + Inches(0.14),
-                col_w - Inches(0.64), item_h - Inches(0.24),
-                size=10, color=WHITE, wrap=True)
+        y       = y_start + Inches(0.35)
+        tx      = Inches(0.4)
+        cw_list = [Inches(2.0), Inches(0.9), Inches(0.9), Inches(1.05), Inches(0.9), Inches(1.05)]
+        row_h   = Inches(0.275)
+        total_w = sum(cw_list)
+        headers = ["Location", "Leads", "Visits", "CPL", "Quotes", "Spend"]
 
+        _box(slide, tx, y, total_w, row_h, fill_color=ORANGE)
+        cx = tx
+        for hdr, cw in zip(headers, cw_list):
+            _txt(slide, hdr, cx + Inches(0.03), y + Inches(0.03),
+                 cw, row_h,
+                 size=8.5, bold=True, color=WHITE, align=PP_ALIGN.CENTER, font="Calibri")
+            cx += cw
+
+        for ri, row in enumerate(rows[:6]):
+            ry = y + row_h * (ri + 1)
+            _box(slide, tx, ry, total_w, row_h,
+                 fill_color=WHITE if ri % 2 == 0 else ROW_ALT)
+
+            cpl_raw = row.get("cpl", 0)
+            try:
+                cpl_val   = float(str(cpl_raw).replace("$", "").replace(",", ""))
+                cpl_color = GREEN if cpl_val < 100 else (RED if cpl_val > 175 else DARK)
+                cpl_str   = f"${cpl_val:,.2f}"
+            except (ValueError, TypeError):
+                cpl_color = DARK
+                cpl_str   = str(cpl_raw)
+
+            visits_val = row.get("visits", 0)
+            try:
+                visit_num   = int(str(visits_val).replace(",", ""))
+                visit_color = RED if visit_num <= 2 else DARK
+            except (ValueError, TypeError):
+                visit_color = DARK
+
+            spend = row.get("spend", 0)
+            spend_str = f"${spend:,.0f}" if isinstance(spend, (int, float)) else str(spend)
+
+            vals   = [row.get("location",""), str(row.get("leads","")),
+                      str(visits_val), cpl_str, str(row.get("quotes","")), spend_str]
+            cols   = [DARK, DARK, visit_color, cpl_color, DARK, DARK]
+            aligns = [PP_ALIGN.LEFT] + [PP_ALIGN.CENTER] * 5
+            bolds  = [True] + [False] * 5
+
+            cx = tx
+            for val, col, al, bld, cw in zip(vals, cols, aligns, bolds, cw_list):
+                _txt(slide, str(val), cx + Inches(0.03), ry + Inches(0.03),
+                     cw, row_h - Inches(0.03),
+                     size=8.5, bold=bld, color=col, align=al, font="Calibri")
+                cx += cw
+
+        return y + row_h * (min(len(rows), 6) + 1) + Inches(0.04)
+
+    y_pos = Inches(2.04)
+    y_pos = _loc_table("Top Performers — Leads & Visits",
+                       c.get("top_performers", []), y_pos, GREEN)
+    y_pos += Inches(0.08)
+    _loc_table("Needs Attention — Low Volume or High CPL",
+               c.get("needs_attention", []), y_pos, RED)
+
+    _right_panel(slide,
+                 "Key Insights",
+                 _to_list(c.get("key_insights", [])),
+                 "Focus Areas",
+                 _to_list(c.get("focus_areas", [])))
+
+    _sg_logo(slide)
     return slide
 
 
-# ── Slide 7: Strategic Recommendations ────────────────────────────────────
-
-def _slide7(prs: Presentation, content: Dict[str, Any]):
+def _slide4(prs: Presentation, report: Dict):
+    """Slide 4 — Attribution & Data Integrity."""
     slide = _blank_slide(prs)
-    _header(slide, "Strategic Recommendations")
+    c = _get_slide_content(report, 4)
 
-    recs = content.get("recommendations", [])
-    whats_next = content.get("whats_next", "")
+    _txt(slide, "Attribution & Data Integrity",
+         Inches(0.4), Inches(0.15), RP - Inches(0.5), Inches(0.65),
+         size=28, bold=True, color=DARK, font="Georgia")
 
-    rec_count = min(len(recs), 3)
-    if rec_count == 0:
-        _txtbox(slide, "No recommendations generated.",
-                M, CT + Inches(1), CW, Inches(0.4),
-                size=13, color=GRAY, align=PP_ALIGN.CENTER)
-        return slide
+    sync      = c.get("hubspot_sync", {})
+    pmax      = c.get("pmax_status", "Monitoring")
+    pixel     = c.get("meta_pixel_status", "Healthy")
+    lead_sc   = c.get("lead_scoring_status", "In Progress")
+    acc_table = c.get("accuracy_table", [])
 
-    rec_w = (CW - Inches(0.3)) / 3
-    rec_h = Inches(3.5)
-    accents = [GOLD, BLUE_ACC, GREEN]
+    def _card(y_start, title, status, platforms=None, body=None, table=None):
+        extra = Inches(0.3) * len(platforms or [])
+        if table:
+            extra += Inches(0.88)
+        if body:
+            extra += Inches(0.52)
+        card_h = Inches(0.68) + extra
 
-    for i, rec in enumerate(recs[:3]):
-        rx = M + i * (rec_w + Inches(0.15))
-        ry = CT + Inches(0.08)
-        acc = accents[i % len(accents)]
+        _box(slide, Inches(0.4), y_start, RP - Inches(0.5), card_h,
+             fill_color=WHITE, line_color=GRAY_BDR, line_pt=0.5)
+        _box(slide, Inches(0.4), y_start, Inches(0.06), card_h, fill_color=ORANGE)
 
-        _box(slide, rx, ry, rec_w, rec_h, NAVY_CARD)
-        _box(slide, rx, ry, rec_w, Inches(0.07), acc)
+        _txt(slide, title,
+             Inches(0.56), y_start + Inches(0.1), Inches(4.6), Inches(0.36),
+             size=12, bold=True, color=DARK, font="Georgia")
+        sc = _status_color(status)
+        _txt(slide, f"[{status}]",
+             Inches(5.3), y_start + Inches(0.11), Inches(3.0), Inches(0.3),
+             size=10.5, bold=True, color=sc, font="Calibri")
 
-        # Number
-        _txtbox(slide, f"0{i+1}",
-                rx + Inches(0.14), ry + Inches(0.16),
-                rec_w - Inches(0.22), Inches(0.52),
-                size=30, bold=True, color=acc)
+        y = y_start + Inches(0.5)
 
-        # Title
-        title = rec.get("title", "")
-        _txtbox(slide, title,
-                rx + Inches(0.14), ry + Inches(0.72),
-                rec_w - Inches(0.22), Inches(0.64),
-                size=12, bold=True, color=WHITE, wrap=True)
+        if platforms:
+            px = Inches(0.62)
+            for plat, pstat in platforms.items():
+                pc = _status_color(pstat)
+                _txt(slide, f"{plat}:", px, y, Inches(1.1), Inches(0.26),
+                     size=9, bold=True, color=DARK, font="Calibri")
+                _txt(slide, pstat, px + Inches(1.05), y, Inches(1.5), Inches(0.26),
+                     size=9, color=pc, font="Calibri")
+                px += Inches(2.6)
+            y += Inches(0.32)
 
-        # Body
-        body = rec.get("body", "")
-        _txtbox(slide, body,
-                rx + Inches(0.14), ry + Inches(1.4),
-                rec_w - Inches(0.22), rec_h - Inches(1.58),
-                size=9, color=GRAY, wrap=True)
+        if table:
+            tbl_x   = Inches(0.56)
+            tbl_cws = [Inches(1.4), Inches(1.1), Inches(1.1), Inches(1.5), Inches(1.0), Inches(0.9)]
+            tbl_hdrs = ["Metric", "In-Platform", "HubSpot", "Variance", "Accuracy", "Target: 85%"]
+            tr_h    = Inches(0.26)
+            tbl_w   = sum(tbl_cws)
 
-    # What's Next
-    if whats_next:
-        wn_top = CT + rec_h + Inches(0.22)
-        _box(slide, M, wn_top, CW, Inches(1.05), NAVY_CARD)
-        _txtbox(slide, "WHAT'S NEXT",
-                M + Inches(0.14), wn_top + Inches(0.08),
-                Inches(1.8), Inches(0.28),
-                size=9, bold=True, color=GOLD)
-        _txtbox(slide, whats_next,
-                M + Inches(0.14), wn_top + Inches(0.36),
-                CW - Inches(0.28), Inches(0.62),
-                size=9, color=WHITE, wrap=True)
+            _box(slide, tbl_x, y, tbl_w, tr_h, fill_color=ORANGE)
+            cx = tbl_x
+            for hdr, cw in zip(tbl_hdrs, tbl_cws):
+                _txt(slide, hdr, cx + Inches(0.02), y + Inches(0.03), cw, tr_h,
+                     size=8, bold=True, color=WHITE, align=PP_ALIGN.CENTER, font="Calibri")
+                cx += cw
 
+            for ri, trow in enumerate(table):
+                ry  = y + tr_h * (ri + 1)
+                _box(slide, tbl_x, ry, tbl_w, tr_h,
+                     fill_color=WHITE if ri % 2 == 0 else ROW_ALT)
+                on_tgt  = trow.get("on_target")
+                tgt_txt = "✓" if on_tgt is True else ("✗" if on_tgt is False else "—")
+                tgt_col = GREEN if on_tgt is True else (RED if on_tgt is False else DARK)
+                acc_col = GREEN if on_tgt is True else (RED if on_tgt is False else DARK)
+                row_vals = [trow.get("metric",""), trow.get("platform",""),
+                            trow.get("hubspot",""), trow.get("variance",""),
+                            trow.get("accuracy",""), tgt_txt]
+                row_cols = [DARK, DARK, DARK, DARK, acc_col, tgt_col]
+                cx = tbl_x
+                for val, col, cw in zip(row_vals, row_cols, tbl_cws):
+                    _txt(slide, str(val), cx + Inches(0.02), ry + Inches(0.03), cw, tr_h,
+                         size=8.5, color=col, align=PP_ALIGN.CENTER, font="Calibri")
+                    cx += cw
+            y += tr_h * (len(table) + 1) + Inches(0.06)
+
+        if body:
+            _txt(slide, str(body),
+                 Inches(0.56), y, RP - Inches(0.9), Inches(0.52),
+                 size=9, color=GRAY_SUB, font="Calibri", wrap=True)
+
+        return y_start + card_h + Inches(0.1)
+
+    y = Inches(0.93)
+    y = _card(y, "HubSpot Attribution Sync",
+              sync.get("overall_status", "In Progress"),
+              platforms={
+                  "Google":    sync.get("google_status",    "In Progress"),
+                  "Meta":      sync.get("meta_status",      "In Progress"),
+                  "Microsoft": sync.get("microsoft_status", "In Progress"),
+              },
+              table=acc_table)
+    y = _card(y, "PMax Attribution", pmax,
+              body="With Google + HubSpot Sync QA'd, PMax is climbing out of the learning phase.")
+    y = _card(y, "Meta Pixel Health", pixel,
+              body="Meta Pixel is firing and optimised for high-intent conversions.")
+    _card(y, "Lead Scoring", lead_sc,
+          body="Once established in HubSpot, lead scoring will unlock enhanced conversions in Google.")
+
+    _right_panel(slide, "Action Items",
+                 _to_list(c.get("action_items", [])))
+
+    _sg_logo(slide)
     return slide
 
 
-# ── Public API ─────────────────────────────────────────────────────────────
+def _slide5(prs: Presentation, report: Dict):
+    """Slide 5 — Ad Development & Testing (Top Creatives)."""
+    slide = _blank_slide(prs)
+    c = _get_slide_content(report, 5)
 
-_BUILDERS = {
-    1: _slide1,
-    2: _slide2,
-    3: _slide3,
-    4: _slide4,
-    5: _slide5,
-    6: _slide6,
-    7: _slide7,
-}
+    _txt(slide, "Ad Development & Testing",
+         Inches(0.4), Inches(0.15), RP - Inches(0.5), Inches(0.65),
+         size=28, bold=True, color=DARK, font="Georgia", wrap=False)
+    _box(slide, Inches(0.4), Inches(0.75), Inches(7.0), Pt(1.5), fill_color=DARK)
+
+    creatives = c.get("creatives", report.get("top_creatives", []))
+    y = Inches(0.98)
+
+    for creative in creatives[:4]:
+        ad_name     = creative.get("ad_name", "Ad Creative")
+        campaign    = creative.get("campaign_name", "")
+        leads       = creative.get("leads", 0)
+        spend       = creative.get("spend", 0)
+        cpl         = creative.get("cpl", 0)
+        link_clicks = creative.get("link_clicks", creative.get("clicks", 0))
+
+        _txt(slide, campaign,
+             Inches(0.4), y, Inches(8.7), Inches(0.24),
+             size=9, italic=True, bold=True, color=DARK, font="Calibri")
+        y += Inches(0.25)
+
+        card_h = Inches(0.9)
+        _box(slide, Inches(0.4), y, Inches(1.3), card_h, fill_color=ROW_ALT)
+        _txt(slide, "Ad\nCreative",
+             Inches(0.42), y + Inches(0.28), Inches(1.25), Inches(0.42),
+             size=7.5, color=GRAY_SUB, align=PP_ALIGN.CENTER, font="Calibri")
+
+        result      = creative.get("result_label", "Top Creative")
+        result_color = GREEN if "winner" in result.lower() else ORANGE
+        _txt(slide, result,
+             Inches(1.82), y + Inches(0.05), Inches(3.2), Inches(0.35),
+             size=12, bold=True, color=result_color, font="Georgia")
+
+        metrics_str = (
+            f"{leads:,} Leads  |  ${cpl:,.2f} CPL  |  "
+            f"{link_clicks:,} Link Clicks  |  ${spend:,.0f} Spend"
+        )
+        _txt(slide, metrics_str,
+             Inches(1.82), y + Inches(0.40), Inches(7.1), Inches(0.25),
+             size=8.5, color=DARK, font="Calibri")
+
+        note = creative.get("note", "")
+        if note:
+            _txt(slide, note,
+                 Inches(1.82), y + Inches(0.62), Inches(7.1), Inches(0.28),
+                 size=8.5, color=GRAY_SUB, font="Calibri")
+
+        y += card_h + Inches(0.2)
+
+    _right_panel(slide,
+                 "Key Takeaways",
+                 _to_list(c.get("key_takeaways", ["Exterior Shots tend to perform best."])),
+                 "Next Steps",
+                 _to_list(c.get("next_steps", ["Iterate on winning creative styles."])))
+
+    _sg_logo(slide)
+    return slide
+
+
+def _slide6(prs: Presentation, report: Dict):
+    """Slide 6 — Current Initiatives & Priority Updates."""
+    slide = _blank_slide(prs)
+    c = _get_slide_content(report, 6)
+
+    _oval(slide, Inches(9.4), Inches(0.3), Inches(5.2), Inches(5.2), PEACH)
+
+    _txt(slide, "Current Initiatives & Priority Updates",
+         Inches(0.4), Inches(0.18), Inches(9.0), Inches(0.65),
+         size=26, bold=True, color=ORANGE, font="Georgia")
+
+    raw = c.get("initiatives", [])
+    parsed: List[Dict] = []
+    for item in raw:
+        item = str(item).strip()
+        if not item:
+            continue
+        if ":" in item:
+            parts   = item.split(":", 1)
+            title   = parts[0].strip()
+            bullets = [b.strip() for b in parts[1].split("|") if b.strip()]
+        else:
+            title   = item
+            bullets = []
+        parsed.append({"title": title, "bullets": bullets})
+
+    y = Inches(1.02)
+    for i, initiative in enumerate(parsed[:5]):
+        title   = initiative.get("title", "")
+        bullets = initiative.get("bullets", [])
+        card_h  = Inches(0.62) + Inches(0.26) * len(bullets)
+
+        _box(slide, Inches(0.4), y, Inches(8.7), card_h,
+             fill_color=WHITE, line_color=GRAY_BDR, line_pt=0.5)
+        _box(slide, Inches(0.4), y, Inches(0.05), card_h, fill_color=ORANGE)
+        _oval(slide, Inches(0.56), y + Inches(0.11), Inches(0.42), Inches(0.42), ORANGE)
+        _txt(slide, str(i + 1),
+             Inches(0.56), y + Inches(0.09), Inches(0.42), Inches(0.42),
+             size=12, bold=True, color=WHITE, align=PP_ALIGN.CENTER, font="Calibri")
+        _txt(slide, title,
+             Inches(1.1), y + Inches(0.12), Inches(7.4), Inches(0.36),
+             size=12, bold=True, color=DARK, font="Georgia")
+
+        by = y + Inches(0.48)
+        for bullet in bullets:
+            _txt(slide, f"●  {bullet}",
+                 Inches(1.3), by, Inches(7.1), Inches(0.26),
+                 size=9, color=DARK, font="Calibri")
+            by += Inches(0.26)
+
+        y += card_h + Inches(0.1)
+
+    _sg_logo(slide)
+    return slide
+
+
+def _slide7(prs: Presentation, report: Dict):
+    """Slide 7 — Strategic Recommendations."""
+    slide = _blank_slide(prs)
+    c = _get_slide_content(report, 7)
+
+    _txt(slide, "Strategic Recommendations",
+         Inches(0.4), Inches(0.15), RP - Inches(0.5), Inches(0.65),
+         size=28, bold=True, color=DARK, font="Georgia")
+
+    recs = c.get("recommendations", [])
+    y    = Inches(0.94)
+
+    for rec in recs[:4]:
+        title   = rec.get("title", "")
+        body    = rec.get("body", "")
+        bullets = _to_list(body) if body else []
+
+        card_h  = Inches(0.52) + Inches(0.3) * max(len(bullets), 1)
+
+        _box(slide, Inches(0.4), y, RP - Inches(0.5), card_h,
+             fill_color=WHITE, line_color=GRAY_BDR, line_pt=0.5)
+        _box(slide, Inches(0.4), y, Inches(0.06), card_h, fill_color=ORANGE)
+        _txt(slide, title,
+             Inches(0.58), y + Inches(0.09), RP - Inches(0.92), Inches(0.36),
+             size=12, bold=True, color=DARK, font="Georgia")
+
+        by = y + Inches(0.45)
+        for bullet in bullets:
+            _txt(slide, f"●  {bullet}",
+                 Inches(0.66), by, RP - Inches(1.0), Inches(0.3),
+                 size=9, color=DARK, font="Calibri", wrap=True)
+            by += Inches(0.3)
+
+        y += card_h + Inches(0.12)
+
+    _right_panel(slide, "What's Next",
+                 _to_list(c.get("whats_next", "")))
+
+    _sg_logo(slide)
+    return slide
+
+
+# ─── Public API ───────────────────────────────────────────────────────────────
+
+_BUILDERS = [_slide1, _slide2, _slide3, _slide4, _slide5, _slide6, _slide7]
 
 
 def build_pptx(report: Dict[str, Any]) -> bytes:
     """
-    Build a Schumacher Homes Monthly Report PPTX from a MonthlySlidesResponse dict.
-    Returns raw PPTX bytes ready for download or Drive upload.
+    Build a 7-slide branded PPTX from a MonthlySlidesResponse dict.
+    Returns raw bytes suitable for streaming or uploading to Google Drive.
     """
     prs = Presentation()
-    prs.slide_width = SW
+    prs.slide_width  = SW
     prs.slide_height = SH
 
-    for slide_data in report.get("slides", []):
-        n = slide_data.get("slide_number", 0)
-        content = slide_data.get("content", {})
-        builder = _BUILDERS.get(n)
-        if builder:
-            builder(prs, content)
+    for i, builder in enumerate(_BUILDERS):
+        try:
+            builder(prs, report)
+        except Exception as exc:
+            import traceback
+            print(f"[pptx_builder] Error on slide {i + 1}: {exc}")
+            traceback.print_exc()
+            err_slide = _blank_slide(prs)
+            _txt(err_slide, f"Slide {i + 1} — Generation Error",
+                 Inches(1), Inches(3), Inches(11), Inches(1),
+                 size=16, bold=True, color=RED)
 
     buf = io.BytesIO()
     prs.save(buf)
-    buf.seek(0)
-    return buf.read()
+    return buf.getvalue()
