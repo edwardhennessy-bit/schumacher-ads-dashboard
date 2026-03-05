@@ -77,12 +77,14 @@ export function Sidebar() {
   const [apiConnected, setApiConnected] = useState(false);
 
   const [googleConnected, setGoogleConnected] = useState(false);
+  const [microsoftConnected, setMicrosoftConnected] = useState(false);
 
   useEffect(() => {
     api.getStatus()
       .then((status) => {
         setApiConnected(status.meta_connected);
         setGoogleConnected(status.google_connected);
+        setMicrosoftConnected(status.microsoft_connected);
       })
       .catch(() => setApiConnected(false));
   }, []);
@@ -137,6 +139,14 @@ export function Sidebar() {
           )}>
             <p className="text-xs font-medium">
               {googleConnected ? "Google: Connected" : "Google: Not Connected"}
+            </p>
+          </div>
+          <div className={cn(
+            "rounded-lg p-3",
+            microsoftConnected ? "bg-green-50 dark:bg-green-950" : "bg-muted"
+          )}>
+            <p className="text-xs font-medium">
+              {microsoftConnected ? "Microsoft: Connected" : "Microsoft: Not Connected"}
             </p>
           </div>
         </div>

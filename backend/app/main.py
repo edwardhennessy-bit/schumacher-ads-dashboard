@@ -15,6 +15,7 @@ from app.routers.gateway import router as gateway_router
 from app.routers.google_metrics import router as google_metrics_router
 from app.routers.auth import router as auth_router
 from app.routers.reporting import router as reporting_router
+from app.routers.monthly_report import router as monthly_report_router
 
 settings = get_settings()
 
@@ -138,6 +139,7 @@ app.include_router(auth_router)
 app.include_router(reporting_router)
 app.include_router(chat_router)
 app.include_router(microsoft_router)
+app.include_router(monthly_report_router)
 
 
 @app.get("/")
@@ -165,7 +167,7 @@ async def api_status():
     return {
         "meta_connected": bool(settings.meta_ad_account_id),
         "google_connected": bool(settings.gateway_token or settings.google_ads_developer_token),
-        "microsoft_connected": False,  # placeholder for future
+        "microsoft_connected": bool(settings.gateway_token),
         "claude_connected": bool(settings.anthropic_api_key),
         "slack_webhook_connected": bool(settings.slack_webhook_url),
         "jarvis_bot_configured": settings.is_slack_bot_configured(),
