@@ -14,6 +14,7 @@ import {
   Upload,
   FileText,
   X,
+  Globe,
 } from "lucide-react";
 import { SlidePreview } from "./SlidePreview";
 
@@ -728,6 +729,7 @@ function Step7({
   const [slidesLoading, setSlidesLoading] = useState(false);
   const [slidesError, setSlidesError] = useState("");
   const [pptxLoading, setPptxLoading] = useState(false);
+  const [htmlLoading, setHtmlLoading] = useState(false);
 
   const { start, end } = monthStartEnd(year, month);
 
@@ -814,6 +816,32 @@ function Step7({
       // silent — browser will show default error
     } finally {
       setPptxLoading(false);
+    }
+  }, [report, month, year]);
+
+  const handleDownloadHtml = useCallback(async () => {
+    if (!report) return;
+    setHtmlLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/reports/download-html`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(report),
+      });
+      if (!res.ok) throw new Error(res.statusText);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Schumacher Homes - ${MONTHS[month - 1]} ${year} Report.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      // silent — browser will show default error
+    } finally {
+      setHtmlLoading(false);
     }
   }, [report, month, year]);
 
@@ -912,6 +940,23 @@ function Step7({
           {/* ── Export bar ── */}
           <div className="flex flex-col gap-3 pt-3 border-t border-gray-100">
             <div className="flex items-center gap-3 flex-wrap">
+              {/* HTML Report — primary export */}
+              <button
+                onClick={handleDownloadHtml}
+                disabled={htmlLoading}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all shadow-md ${
+                  htmlLoading
+                    ? "bg-[#1a2744]/60 text-white/60 cursor-not-allowed"
+                    : "bg-[#1a2744] text-white hover:bg-[#243564] active:scale-[0.98]"
+                }`}
+              >
+                {htmlLoading ? (
+                  <><RefreshCw className="h-4 w-4 animate-spin" /> Generating HTML...</>
+                ) : (
+                  <><Globe className="h-4 w-4" /> Download HTML Report <span className="ml-1 text-[#D4601A] font-bold">✦</span></>
+                )}
+              </button>
+
               {/* Google Slides */}
               <button
                 onClick={handleOpenGoogleSlides}
@@ -957,7 +1002,7 @@ function Step7({
               </button>
 
               <span className="text-xs text-gray-400 hidden sm:block">
-                or use browser Print → Save as PDF
+                HTML → open in browser → Print → Save as PDF
               </span>
             </div>
 

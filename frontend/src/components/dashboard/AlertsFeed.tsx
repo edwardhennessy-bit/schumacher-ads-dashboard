@@ -148,7 +148,7 @@ export function AlertsFeed({
                     {alert.recommendation}
                   </p>
                   <div className="flex items-center justify-between mt-1">
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-xs text-muted-foreground" suppressHydrationWarning>
                       {formatDistanceToNow(new Date(alert.createdAt), {
                         addSuffix: true,
                       })}

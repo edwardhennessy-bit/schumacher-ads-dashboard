@@ -29,6 +29,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.services.pptx_builder import build_pptx
+from app.services.html_report_generator import generate_html_report
 
 from app.config import get_settings
 from app.routers.microsoft import _parse_float, _parse_int, SCHUMACHER_MICROSOFT_ACCOUNT_ID
@@ -1043,3 +1044,27 @@ async def create_google_slides(report: Dict[str, Any] = Body(...)):
     except Exception as e:
         logger.error("google_slides_upload_error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Drive upload failed: {e}")
+
+
+@router.post("/download-html")
+async def download_html_report(report: Dict[str, Any] = Body(...)):
+    """
+    Generate a self-contained HTML report from a MonthlySlidesResponse and return it
+    as a file download.  The output is a single .html file with all CSS inline —
+    no external dependencies — suitable for browser viewing, printing to PDF, and archiving.
+    """
+    month = report.get("report_month", "Report")
+    safe = _safe_filename(month)
+    filename = f"{safe}.html"
+
+    try:
+        html_content = generate_html_report(report)
+    except Exception as e:
+        logger.error("html_report_generation_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"HTML report generation failed: {e}")
+
+    return Response(
+        content=html_content.encode("utf-8"),
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
