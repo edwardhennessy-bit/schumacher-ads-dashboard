@@ -443,22 +443,18 @@ class LiveAPIService:
         account_id: str,
     ) -> Dict[str, Any]:
         """
-        Count ads that are ACTIVE and delivered at least one impression today.
+        Count all ads whose toggle is ON (status=ACTIVE), regardless of delivery state.
 
-        Uses today-only insights (since=today, until=today) so the count always
-        reflects what is live right now — not a rolling window that could include
-        ads that stopped delivering days ago.
+        This includes ads that are actively delivering, in the learning phase, in review,
+        or pending — matching what Meta Ads Manager shows as "active" (blue toggle on).
         """
         if not self.meta_token:
             return {"success": False, "error": "Meta API token not configured"}
 
         import json as _json
-        from datetime import date
-
-        today = date.today().isoformat()
 
         active_filter = _json.dumps([{
-            "field": "effective_status",
+            "field": "status",
             "operator": "IN",
             "value": ["ACTIVE"],
         }])
@@ -466,27 +462,19 @@ class LiveAPIService:
         url = f"{META_API_BASE}/{account_id}/ads"
         params = {
             "access_token": self.meta_token,
-            "fields": (
-                "id,"
-                f"insights.time_range({{'since':'{today}','until':'{today}'}})"
-                "{impressions}"
-            ),
+            "fields": "id",
             "filtering": active_filter,
             "limit": 500,
         }
 
         try:
-            delivering_count = 0
+            active_count = 0
             async with httpx.AsyncClient(timeout=60.0) as client:
                 while url:
                     response = await client.get(url, params=params)
                     response.raise_for_status()
                     data = response.json()
-                    for ad in data.get("data", []):
-                        rows = ad.get("insights", {}).get("data", [])
-                        impressions = int(rows[0].get("impressions", 0)) if rows else 0
-                        if impressions > 0:
-                            delivering_count += 1
+                    active_count += len(data.get("data", []))
 
                     next_url = data.get("paging", {}).get("next")
                     if next_url:
@@ -495,10 +483,10 @@ class LiveAPIService:
                     else:
                         url = None
 
-            logger.info("meta_active_ads_count", account_id=account_id, count=delivering_count)
+            logger.info("meta_active_ads_count", account_id=account_id, count=active_count)
             return {
                 "success": True,
-                "active_ads": delivering_count,
+                "active_ads": active_count,
             }
 
         except Exception as e:
@@ -510,33 +498,22 @@ class LiveAPIService:
         account_id: str,
     ) -> Dict[str, Any]:
         """
-        Fetch the hierarchy of actively-delivering campaigns → ad sets → ads.
+        Fetch the hierarchy of toggle-on campaigns → ad sets → ads.
 
-        Two-stage filter:
-          1. effective_status=ACTIVE — Meta's guarantee that ad + adset + campaign are all on.
-          2. Delivery check — fetch 7-day impressions per ad and exclude any ad with 0 impressions.
-             This removes phantom-active ads (past-event open houses, exhausted budgets, etc.)
-             that Meta leaves in ACTIVE status indefinitely even when they stopped delivering.
-
-        Tree is built bottom-up: adsets/campaigns only appear if they have ≥1 delivering ad.
+        Filters by status=ACTIVE (the toggle state), which includes ads that are
+        actively delivering, in the learning phase, in review, or pending — matching
+        exactly what Meta Ads Manager shows as active (blue toggle on).
         """
         import json as _json
-        from datetime import date, timedelta
 
         if not self.meta_token:
             return {"success": False, "error": "Meta API token not configured"}
 
         active_filter = _json.dumps([{
-            "field": "effective_status",
+            "field": "status",
             "operator": "IN",
             "value": ["ACTIVE"],
         }])
-
-        # 7-day delivery window — any ad that served at least once this week counts as
-        # actively delivering.  Using today-only was too strict and hid ads that are
-        # scheduled / rotating and may not have served yet today.
-        today = date.today().isoformat()
-        seven_days_ago = (date.today() - timedelta(days=7)).isoformat()
 
         async def paginate(client: httpx.AsyncClient, url: str, params: dict) -> List[dict]:
             results = []
@@ -567,31 +544,19 @@ class LiveAPIService:
                     "limit": 200,
                 })
 
-                # 3. Fetch all active ads WITH 7-day impressions inline for delivery check
+                # 3. Fetch all toggle-on ads
                 ads_raw = await paginate(client, f"{META_API_BASE}/{account_id}/ads", {
                     "access_token": self.meta_token,
-                    "fields": (
-                        "id,name,status,effective_status,adset_id,campaign_id,"
-                        f"insights.time_range({{'since':'{seven_days_ago}','until':'{today}'}})"
-                        "{impressions}"
-                    ),
+                    "fields": "id,name,status,effective_status,adset_id,campaign_id",
                     "filtering": active_filter,
                     "limit": 500,
                 })
 
-            # Build a set of ad IDs that had ≥1 impression in the last 7 days
-            delivering_ad_ids: set = set()
-            for ad in ads_raw:
-                rows = ad.get("insights", {}).get("data", [])
-                impressions = int(rows[0].get("impressions", 0)) if rows else 0
-                if impressions > 0:
-                    delivering_ad_ids.add(ad["id"])
-
             logger.info(
-                "meta_active_ads_delivery_filter",
-                total_active=len(ads_raw),
-                delivering_today=len(delivering_ad_ids),
-                phantom=len(ads_raw) - len(delivering_ad_ids),
+                "meta_active_ads_tree_fetched",
+                campaigns=len(campaigns_raw),
+                adsets=len(adsets_raw),
+                ads=len(ads_raw),
             )
 
             # Index adsets by campaign
@@ -600,11 +565,9 @@ class LiveAPIService:
                 cid = adset.get("campaign_id", "")
                 adsets_by_campaign.setdefault(cid, []).append(adset)
 
-            # Index delivering ads by adset (exclude phantom-active ads)
+            # Index all toggle-on ads by adset
             ads_by_adset: Dict[str, List[dict]] = {}
             for ad in ads_raw:
-                if ad["id"] not in delivering_ad_ids:
-                    continue  # skip phantom-active / non-delivering ads
                 asid = ad.get("adset_id", "")
                 ads_by_adset.setdefault(asid, []).append(ad)
 
