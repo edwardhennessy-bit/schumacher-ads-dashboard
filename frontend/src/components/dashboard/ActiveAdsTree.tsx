@@ -169,7 +169,7 @@ export function ActiveAdsTree({
           ) : (
             <div className="space-y-2">
               <p className="text-xs text-gray-400 mb-3">
-                {campaigns.length} active {campaigns.length === 1 ? "campaign" : "campaigns"} · {totalActiveAds} active {totalActiveAds === 1 ? "ad" : "ads"} · all filtered by <code className="bg-gray-100 px-1 rounded">effective_status = ACTIVE</code>
+                {campaigns.length} active {campaigns.length === 1 ? "campaign" : "campaigns"} · {totalActiveAds} active {totalActiveAds === 1 ? "ad" : "ads"} · <code className="bg-gray-100 px-1 rounded">effective_status = ACTIVE</code> + delivered in last 7 days
               </p>
               {campaigns.map((campaign) => (
                 <CampaignRow key={campaign.id} campaign={campaign} />

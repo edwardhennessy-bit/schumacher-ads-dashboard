@@ -521,7 +521,7 @@ class LiveAPIService:
         Tree is built bottom-up: adsets/campaigns only appear if they have ≥1 delivering ad.
         """
         import json as _json
-        from datetime import date
+        from datetime import date, timedelta
 
         if not self.meta_token:
             return {"success": False, "error": "Meta API token not configured"}
@@ -532,8 +532,11 @@ class LiveAPIService:
             "value": ["ACTIVE"],
         }])
 
-        # Today-only delivery window — shows exactly what is live right now
+        # 7-day delivery window — any ad that served at least once this week counts as
+        # actively delivering.  Using today-only was too strict and hid ads that are
+        # scheduled / rotating and may not have served yet today.
         today = date.today().isoformat()
+        seven_days_ago = (date.today() - timedelta(days=7)).isoformat()
 
         async def paginate(client: httpx.AsyncClient, url: str, params: dict) -> List[dict]:
             results = []
@@ -564,12 +567,12 @@ class LiveAPIService:
                     "limit": 200,
                 })
 
-                # 3. Fetch all active ads WITH today's impressions inline for delivery check
+                # 3. Fetch all active ads WITH 7-day impressions inline for delivery check
                 ads_raw = await paginate(client, f"{META_API_BASE}/{account_id}/ads", {
                     "access_token": self.meta_token,
                     "fields": (
                         "id,name,status,effective_status,adset_id,campaign_id,"
-                        f"insights.time_range({{'since':'{today}','until':'{today}'}})"
+                        f"insights.time_range({{'since':'{seven_days_ago}','until':'{today}'}})"
                         "{impressions}"
                     ),
                     "filtering": active_filter,
