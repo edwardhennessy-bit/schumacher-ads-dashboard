@@ -443,17 +443,22 @@ class LiveAPIService:
         account_id: str,
     ) -> Dict[str, Any]:
         """
-        Count toggle-on ads that belong to active campaigns only.
+        Count truly-active ads within active campaigns.
 
-        Two-step to ensure paused-campaign ads are never counted:
-          1. Fetch IDs of campaigns with effective_status=ACTIVE.
-          2. Count ads with effective_status IN [ACTIVE, PENDING_REVIEW, IN_PROCESS]
-             that belong to those campaigns only.
+        Rules (same as the tree):
+          - Campaign must have effective_status=ACTIVE.
+          - PENDING_REVIEW / IN_PROCESS ads are always counted (legitimately new/in review).
+          - ACTIVE ads are only counted if they had ≥1 impression in the last 7 days
+            (filters out phantom-active ads for past events that Meta leaves ACTIVE forever).
         """
         if not self.meta_token:
             return {"success": False, "error": "Meta API token not configured"}
 
         import json as _json
+        from datetime import date, timedelta
+
+        today = date.today().isoformat()
+        seven_days_ago = (date.today() - timedelta(days=7)).isoformat()
 
         campaign_filter = _json.dumps([{
             "field": "effective_status",
@@ -490,12 +495,16 @@ class LiveAPIService:
                 if not campaign_ids:
                     return {"success": True, "active_ads": 0}
 
-                # Step 2: count ads in those campaigns only
+                # Step 2: count ads in those campaigns with smart delivery filter
                 active_count = 0
                 url = f"{META_API_BASE}/{account_id}/ads"
                 params = {
                     "access_token": self.meta_token,
-                    "fields": "id,campaign_id",
+                    "fields": (
+                        "id,campaign_id,effective_status,"
+                        f"insights.time_range({{'since':'{seven_days_ago}','until':'{today}'}})"
+                        "{impressions}"
+                    ),
                     "filtering": ads_filter,
                     "limit": 500,
                 }
@@ -504,8 +513,16 @@ class LiveAPIService:
                     resp.raise_for_status()
                     data = resp.json()
                     for ad in data.get("data", []):
-                        if ad.get("campaign_id") in campaign_ids:
-                            active_count += 1
+                        if ad.get("campaign_id") not in campaign_ids:
+                            continue
+                        es = ad.get("effective_status", "")
+                        if es in ("PENDING_REVIEW", "IN_PROCESS"):
+                            active_count += 1  # always count — genuinely new/in review
+                        else:
+                            rows = ad.get("insights", {}).get("data", [])
+                            impressions = int(rows[0].get("impressions", 0)) if rows else 0
+                            if impressions > 0:
+                                active_count += 1  # only count if actually delivered recently
                     url = data.get("paging", {}).get("next")
                     params = {}
 
@@ -521,28 +538,29 @@ class LiveAPIService:
         account_id: str,
     ) -> Dict[str, Any]:
         """
-        Fetch the hierarchy of toggle-on campaigns → ad sets → ads.
+        Fetch the hierarchy of active campaigns → ad sets → ads.
 
-        Campaigns/adsets: effective_status=ACTIVE (full chain is running).
-        Ads: effective_status IN [ACTIVE, PENDING_REVIEW, IN_PROCESS, PREAPPROVED]
-             so that in-review and learning ads within active campaigns are included.
-        The Meta API does not support filtering by the `status` field directly.
+        Campaign/adset filter: effective_status=ACTIVE (full chain running).
+        Ad inclusion rules:
+          - PENDING_REVIEW / IN_PROCESS: always included (legitimately new/in review).
+          - ACTIVE: only included if ≥1 impression in the last 7 days, which filters
+            out phantom-active ads for past events that Meta leaves ACTIVE indefinitely.
         """
         import json as _json
+        from datetime import date, timedelta
 
         if not self.meta_token:
             return {"success": False, "error": "Meta API token not configured"}
 
-        # Campaigns and adsets: effective_status=ACTIVE (the full chain is running)
+        today = date.today().isoformat()
+        seven_days_ago = (date.today() - timedelta(days=7)).isoformat()
+
         effective_active_filter = _json.dumps([{
             "field": "effective_status",
             "operator": "IN",
             "value": ["ACTIVE"],
         }])
 
-        # Ads: include all toggle-on effective_statuses. The Meta API does not support
-        # filtering by the `status` field — only effective_status is valid.
-        # ACTIVE = delivering/learning, PENDING_REVIEW = in review, IN_PROCESS = processing.
         ads_filter = _json.dumps([{
             "field": "effective_status",
             "operator": "IN",
@@ -557,12 +575,12 @@ class LiveAPIService:
                 data = resp.json()
                 results.extend(data.get("data", []))
                 url = data.get("paging", {}).get("next")
-                params = {}  # next URL already contains all params
+                params = {}
             return results
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                # 1. Fetch effective-active campaigns (full chain running)
+                # 1. Fetch effective-active campaigns
                 campaigns_raw = await paginate(client, f"{META_API_BASE}/{account_id}/campaigns", {
                     "access_token": self.meta_token,
                     "fields": "id,name,status,effective_status",
@@ -578,10 +596,14 @@ class LiveAPIService:
                     "limit": 200,
                 })
 
-                # 3. Fetch all toggle-on ads (status=ACTIVE includes in-review, learning, pending)
+                # 3. Fetch ads with 7-day impressions for phantom-ad filtering
                 ads_raw = await paginate(client, f"{META_API_BASE}/{account_id}/ads", {
                     "access_token": self.meta_token,
-                    "fields": "id,name,status,effective_status,adset_id,campaign_id",
+                    "fields": (
+                        "id,name,status,effective_status,adset_id,campaign_id,"
+                        f"insights.time_range({{'since':'{seven_days_ago}','until':'{today}'}})"
+                        "{impressions}"
+                    ),
                     "filtering": ads_filter,
                     "limit": 500,
                 })
@@ -599,11 +621,21 @@ class LiveAPIService:
                 cid = adset.get("campaign_id", "")
                 adsets_by_campaign.setdefault(cid, []).append(adset)
 
-            # Index all toggle-on ads by adset
+            # Index qualifying ads by adset:
+            # - PENDING_REVIEW / IN_PROCESS: always include
+            # - ACTIVE: only include if delivered in last 7 days (filters phantom-active)
             ads_by_adset: Dict[str, List[dict]] = {}
             for ad in ads_raw:
-                asid = ad.get("adset_id", "")
-                ads_by_adset.setdefault(asid, []).append(ad)
+                es = ad.get("effective_status", "")
+                if es in ("PENDING_REVIEW", "IN_PROCESS"):
+                    qualifies = True
+                else:
+                    rows = ad.get("insights", {}).get("data", [])
+                    impressions = int(rows[0].get("impressions", 0)) if rows else 0
+                    qualifies = impressions > 0
+                if qualifies:
+                    asid = ad.get("adset_id", "")
+                    ads_by_adset.setdefault(asid, []).append(ad)
 
             # Build tree bottom-up: only include adsets/campaigns with ≥1 delivering ad
             tree = []
