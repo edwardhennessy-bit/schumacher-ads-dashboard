@@ -509,7 +509,16 @@ class LiveAPIService:
         if not self.meta_token:
             return {"success": False, "error": "Meta API token not configured"}
 
-        active_filter = _json.dumps([{
+        # Campaigns and adsets: effective_status=ACTIVE (the full chain is running)
+        effective_active_filter = _json.dumps([{
+            "field": "effective_status",
+            "operator": "IN",
+            "value": ["ACTIVE"],
+        }])
+
+        # Ads: status=ACTIVE (toggle is on) — broader than effective_status so includes
+        # ads in review (PENDING_REVIEW) and learning phase within active campaigns/adsets.
+        ads_filter = _json.dumps([{
             "field": "status",
             "operator": "IN",
             "value": ["ACTIVE"],
@@ -528,27 +537,27 @@ class LiveAPIService:
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                # 1. Fetch active campaigns
+                # 1. Fetch effective-active campaigns (full chain running)
                 campaigns_raw = await paginate(client, f"{META_API_BASE}/{account_id}/campaigns", {
                     "access_token": self.meta_token,
                     "fields": "id,name,status,effective_status",
-                    "filtering": active_filter,
+                    "filtering": effective_active_filter,
                     "limit": 100,
                 })
 
-                # 2. Fetch all active ad sets
+                # 2. Fetch effective-active ad sets
                 adsets_raw = await paginate(client, f"{META_API_BASE}/{account_id}/adsets", {
                     "access_token": self.meta_token,
                     "fields": "id,name,status,effective_status,campaign_id",
-                    "filtering": active_filter,
+                    "filtering": effective_active_filter,
                     "limit": 200,
                 })
 
-                # 3. Fetch all toggle-on ads
+                # 3. Fetch all toggle-on ads (status=ACTIVE includes in-review, learning, pending)
                 ads_raw = await paginate(client, f"{META_API_BASE}/{account_id}/ads", {
                     "access_token": self.meta_token,
                     "fields": "id,name,status,effective_status,adset_id,campaign_id",
-                    "filtering": active_filter,
+                    "filtering": ads_filter,
                     "limit": 500,
                 })
 
