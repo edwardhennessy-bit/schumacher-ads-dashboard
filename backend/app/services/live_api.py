@@ -443,52 +443,74 @@ class LiveAPIService:
         account_id: str,
     ) -> Dict[str, Any]:
         """
-        Count all toggle-on ads regardless of delivery state.
+        Count toggle-on ads that belong to active campaigns only.
 
-        Uses effective_status with multiple values to include ads that are actively
-        delivering (ACTIVE), in review (PENDING_REVIEW), or being processed (IN_PROCESS).
-        The Meta API does not support filtering by the `status` field directly.
+        Two-step to ensure paused-campaign ads are never counted:
+          1. Fetch IDs of campaigns with effective_status=ACTIVE.
+          2. Count ads with effective_status IN [ACTIVE, PENDING_REVIEW, IN_PROCESS]
+             that belong to those campaigns only.
         """
         if not self.meta_token:
             return {"success": False, "error": "Meta API token not configured"}
 
         import json as _json
 
-        active_filter = _json.dumps([{
+        campaign_filter = _json.dumps([{
             "field": "effective_status",
             "operator": "IN",
-            "value": ["ACTIVE", "PENDING_REVIEW", "IN_PROCESS", "PREAPPROVED"],
+            "value": ["ACTIVE"],
         }])
 
-        url = f"{META_API_BASE}/{account_id}/ads"
-        params = {
-            "access_token": self.meta_token,
-            "fields": "id",
-            "filtering": active_filter,
-            "limit": 500,
-        }
+        ads_filter = _json.dumps([{
+            "field": "effective_status",
+            "operator": "IN",
+            "value": ["ACTIVE", "PENDING_REVIEW", "IN_PROCESS"],
+        }])
 
         try:
-            active_count = 0
             async with httpx.AsyncClient(timeout=60.0) as client:
+                # Step 1: collect active campaign IDs
+                campaign_ids: set = set()
+                url: str | None = f"{META_API_BASE}/{account_id}/campaigns"
+                params: dict = {
+                    "access_token": self.meta_token,
+                    "fields": "id",
+                    "filtering": campaign_filter,
+                    "limit": 200,
+                }
                 while url:
-                    response = await client.get(url, params=params)
-                    response.raise_for_status()
-                    data = response.json()
-                    active_count += len(data.get("data", []))
+                    resp = await client.get(url, params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    for c in data.get("data", []):
+                        campaign_ids.add(c["id"])
+                    url = data.get("paging", {}).get("next")
+                    params = {}
 
-                    next_url = data.get("paging", {}).get("next")
-                    if next_url:
-                        url = next_url
-                        params = {}
-                    else:
-                        url = None
+                if not campaign_ids:
+                    return {"success": True, "active_ads": 0}
+
+                # Step 2: count ads in those campaigns only
+                active_count = 0
+                url = f"{META_API_BASE}/{account_id}/ads"
+                params = {
+                    "access_token": self.meta_token,
+                    "fields": "id,campaign_id",
+                    "filtering": ads_filter,
+                    "limit": 500,
+                }
+                while url:
+                    resp = await client.get(url, params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    for ad in data.get("data", []):
+                        if ad.get("campaign_id") in campaign_ids:
+                            active_count += 1
+                    url = data.get("paging", {}).get("next")
+                    params = {}
 
             logger.info("meta_active_ads_count", account_id=account_id, count=active_count)
-            return {
-                "success": True,
-                "active_ads": active_count,
-            }
+            return {"success": True, "active_ads": active_count}
 
         except Exception as e:
             logger.error("meta_active_ads_error", error=str(e))
@@ -524,7 +546,7 @@ class LiveAPIService:
         ads_filter = _json.dumps([{
             "field": "effective_status",
             "operator": "IN",
-            "value": ["ACTIVE", "PENDING_REVIEW", "IN_PROCESS", "PREAPPROVED"],
+            "value": ["ACTIVE", "PENDING_REVIEW", "IN_PROCESS"],
         }])
 
         async def paginate(client: httpx.AsyncClient, url: str, params: dict) -> List[dict]:
