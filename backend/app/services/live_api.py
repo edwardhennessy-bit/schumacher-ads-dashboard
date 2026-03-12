@@ -443,10 +443,11 @@ class LiveAPIService:
         account_id: str,
     ) -> Dict[str, Any]:
         """
-        Count all ads whose toggle is ON (status=ACTIVE), regardless of delivery state.
+        Count all toggle-on ads regardless of delivery state.
 
-        This includes ads that are actively delivering, in the learning phase, in review,
-        or pending — matching what Meta Ads Manager shows as "active" (blue toggle on).
+        Uses effective_status with multiple values to include ads that are actively
+        delivering (ACTIVE), in review (PENDING_REVIEW), or being processed (IN_PROCESS).
+        The Meta API does not support filtering by the `status` field directly.
         """
         if not self.meta_token:
             return {"success": False, "error": "Meta API token not configured"}
@@ -454,9 +455,9 @@ class LiveAPIService:
         import json as _json
 
         active_filter = _json.dumps([{
-            "field": "status",
+            "field": "effective_status",
             "operator": "IN",
-            "value": ["ACTIVE"],
+            "value": ["ACTIVE", "PENDING_REVIEW", "IN_PROCESS", "PREAPPROVED"],
         }])
 
         url = f"{META_API_BASE}/{account_id}/ads"
@@ -500,9 +501,10 @@ class LiveAPIService:
         """
         Fetch the hierarchy of toggle-on campaigns → ad sets → ads.
 
-        Filters by status=ACTIVE (the toggle state), which includes ads that are
-        actively delivering, in the learning phase, in review, or pending — matching
-        exactly what Meta Ads Manager shows as active (blue toggle on).
+        Campaigns/adsets: effective_status=ACTIVE (full chain is running).
+        Ads: effective_status IN [ACTIVE, PENDING_REVIEW, IN_PROCESS, PREAPPROVED]
+             so that in-review and learning ads within active campaigns are included.
+        The Meta API does not support filtering by the `status` field directly.
         """
         import json as _json
 
@@ -516,12 +518,13 @@ class LiveAPIService:
             "value": ["ACTIVE"],
         }])
 
-        # Ads: status=ACTIVE (toggle is on) — broader than effective_status so includes
-        # ads in review (PENDING_REVIEW) and learning phase within active campaigns/adsets.
+        # Ads: include all toggle-on effective_statuses. The Meta API does not support
+        # filtering by the `status` field — only effective_status is valid.
+        # ACTIVE = delivering/learning, PENDING_REVIEW = in review, IN_PROCESS = processing.
         ads_filter = _json.dumps([{
-            "field": "status",
+            "field": "effective_status",
             "operator": "IN",
-            "value": ["ACTIVE"],
+            "value": ["ACTIVE", "PENDING_REVIEW", "IN_PROCESS", "PREAPPROVED"],
         }])
 
         async def paginate(client: httpx.AsyncClient, url: str, params: dict) -> List[dict]:
