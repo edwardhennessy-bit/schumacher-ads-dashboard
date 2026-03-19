@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Send, Clock, Loader2, CheckCircle, Maximize2, Minimize2, X } from "lucide-react";
+import { Send, Clock, Loader2, CheckCircle, Maximize2, Minimize2, X, Plus, Hash, Info } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface JarvisSidebarProps {
@@ -81,6 +81,7 @@ interface JarvisFormProps {
   prompt: string;
   setPrompt: (v: string) => void;
   channels: string[];
+  setChannels: (chs: string[]) => void;
   selectedChannel: string;
   setSelectedChannel: (v: string) => void;
   scheduleDay: string;
@@ -99,6 +100,7 @@ function JarvisForm({
   prompt,
   setPrompt,
   channels,
+  setChannels,
   selectedChannel,
   setSelectedChannel,
   scheduleDay,
@@ -114,6 +116,34 @@ function JarvisForm({
 }: JarvisFormProps) {
   const textareaRef = useAutoResize(prompt);
   const gridCols = expanded ? "grid-cols-3" : "grid-cols-2";
+
+  // "Add to channel" state
+  const [showAddChannel, setShowAddChannel] = useState(false);
+  const [newChannelName, setNewChannelName] = useState("");
+  const [addingChannel, setAddingChannel] = useState(false);
+  const [addChannelError, setAddChannelError] = useState("");
+
+  const handleAddChannel = async () => {
+    const ch = newChannelName.trim().lstrip?.("#") ?? newChannelName.trim().replace(/^#/, "");
+    if (!ch) return;
+    setAddingChannel(true);
+    setAddChannelError("");
+    try {
+      const res = await api.addSlackChannel(ch);
+      if (res.success && res.channels) {
+        setChannels(res.channels);
+        setSelectedChannel(ch);
+        setShowAddChannel(false);
+        setNewChannelName("");
+      } else {
+        setAddChannelError(res.error || "Could not add channel");
+      }
+    } catch {
+      setAddChannelError("Failed to save channel");
+    } finally {
+      setAddingChannel(false);
+    }
+  };
 
   return (
     <div className={`flex flex-col flex-1 min-h-0 ${expanded ? "gap-5" : "gap-4"}`}>
@@ -169,7 +199,14 @@ function JarvisForm({
         </div>
         <select
           value={selectedChannel}
-          onChange={(e) => setSelectedChannel(e.target.value)}
+          onChange={(e) => {
+            if (e.target.value === "__add__") {
+              setShowAddChannel(true);
+            } else {
+              setSelectedChannel(e.target.value);
+              setShowAddChannel(false);
+            }
+          }}
           className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
         >
           {channels.map((ch) => (
@@ -177,7 +214,59 @@ function JarvisForm({
               #{ch}
             </option>
           ))}
+          <option value="__add__">＋ Add a Slack channel…</option>
         </select>
+
+        {/* Add-to-channel panel */}
+        {showAddChannel && (
+          <div className="mt-2 rounded-lg border border-indigo-100 bg-indigo-50 p-3 space-y-2.5">
+            {/* Instructions */}
+            <div className="flex gap-2">
+              <Info className="h-3.5 w-3.5 text-indigo-400 shrink-0 mt-0.5" />
+              <div className="text-xs text-indigo-800 space-y-1">
+                <p className="font-semibold">Invite JARVIS to a channel first:</p>
+                <ol className="list-decimal list-inside space-y-0.5 text-indigo-700">
+                  <li>Open the Slack channel you want to add</li>
+                  <li>Type <code className="bg-indigo-100 px-1 rounded font-mono">/invite @Jarvis</code> and send</li>
+                  <li>Then enter the channel name below</li>
+                </ol>
+              </div>
+            </div>
+
+            {/* Channel name input */}
+            <div className="flex gap-1.5">
+              <div className="flex items-center gap-1 flex-1 border border-indigo-200 rounded-lg bg-white px-2 focus-within:ring-2 focus-within:ring-indigo-300">
+                <Hash className="h-3 w-3 text-indigo-400 shrink-0" />
+                <input
+                  type="text"
+                  value={newChannelName}
+                  onChange={(e) => setNewChannelName(e.target.value.replace(/^#/, "").replace(/\s/g, "-").toLowerCase())}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAddChannel(); }}
+                  placeholder="channel-name"
+                  className="text-sm py-1.5 flex-1 outline-none bg-transparent placeholder-gray-400"
+                  autoFocus
+                />
+              </div>
+              <button
+                onClick={handleAddChannel}
+                disabled={!newChannelName.trim() || addingChannel}
+                className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-1"
+              >
+                {addingChannel ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+                Add
+              </button>
+              <button
+                onClick={() => { setShowAddChannel(false); setNewChannelName(""); setAddChannelError(""); }}
+                className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1.5 rounded-lg transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {addChannelError && (
+              <p className="text-xs text-red-600">{addChannelError}</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Auto-schedule */}
@@ -349,6 +438,7 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
     prompt,
     setPrompt,
     channels,
+    setChannels,
     selectedChannel,
     setSelectedChannel,
     scheduleDay,

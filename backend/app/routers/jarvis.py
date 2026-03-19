@@ -20,13 +20,49 @@ SCHEDULE_FILE = DATA_DIR / "jarvis_schedule.json"
 
 DEFAULT_SCHEDULE = {"channel": "jarvis-schumacher", "day": "monday", "hour": 9}
 
-HARDCODED_CHANNELS = ["jarvis-schumacher", "paid-media", "paid-media-team", "general"]
+DEFAULT_CHANNELS = ["jarvis-schumacher", "paid-media", "paid-media-team", "general"]
+CHANNELS_FILE = DATA_DIR / "jarvis_channels.json"
+
+
+def _load_channels() -> list[str]:
+    """Load channels from disk, merged with defaults (deduped, defaults first)."""
+    saved: list[str] = []
+    if CHANNELS_FILE.exists():
+        try:
+            saved = json.loads(CHANNELS_FILE.read_text())
+        except Exception:
+            pass
+    merged = list(DEFAULT_CHANNELS)
+    for ch in saved:
+        if ch not in merged:
+            merged.append(ch)
+    return merged
+
+
+def _save_channels(channels: list[str]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    # Persist only the non-default channels so defaults stay in code
+    extra = [ch for ch in channels if ch not in DEFAULT_CHANNELS]
+    CHANNELS_FILE.write_text(json.dumps(extra, indent=2))
 
 
 @router.get("/channels")
 async def get_channels():
     """Return list of available Slack channels."""
-    return {"channels": HARDCODED_CHANNELS}
+    return {"channels": _load_channels()}
+
+
+@router.post("/channels")
+async def add_channel(body: dict):
+    """Add a custom Slack channel to the persistent list."""
+    channel = (body.get("channel") or "").strip().lstrip("#")
+    if not channel:
+        return {"success": False, "error": "Channel name is required"}
+    channels = _load_channels()
+    if channel not in channels:
+        channels.append(channel)
+        _save_channels(channels)
+    return {"success": True, "channels": channels}
 
 
 @router.post("/schedule")

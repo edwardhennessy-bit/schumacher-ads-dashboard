@@ -256,6 +256,13 @@ class ApiClient {
     return this.fetch("/api/jarvis/channels");
   }
 
+  async addSlackChannel(channel: string): Promise<{ success: boolean; channels?: string[]; error?: string }> {
+    return this.fetch("/api/jarvis/channels", {
+      method: "POST",
+      body: JSON.stringify({ channel }),
+    });
+  }
+
   async sendJarvisReport(params: {
     prompt: string;
     channel: string;
