@@ -79,6 +79,13 @@ export interface ActiveAd {
   id: string;
   name: string;
   status: string;
+  spend?: number;
+  impressions?: number;
+  clicks?: number;
+  ctr?: number;
+  cpc?: number;
+  leads?: number;
+  cost_per_lead?: number;
 }
 
 export interface ActiveAdSet {
@@ -87,6 +94,13 @@ export interface ActiveAdSet {
   status: string;
   ad_count: number;
   ads: ActiveAd[];
+  spend?: number;
+  impressions?: number;
+  clicks?: number;
+  ctr?: number;
+  cpc?: number;
+  leads?: number;
+  cost_per_lead?: number;
 }
 
 export interface ActiveCampaign {
@@ -96,6 +110,13 @@ export interface ActiveCampaign {
   adset_count: number;
   ad_count: number;
   adsets: ActiveAdSet[];
+  spend?: number;
+  impressions?: number;
+  clicks?: number;
+  ctr?: number;
+  cpc?: number;
+  leads?: number;
+  cost_per_lead?: number;
 }
 
 export interface ActiveAdsTree {

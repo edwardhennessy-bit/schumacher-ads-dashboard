@@ -536,15 +536,19 @@ class LiveAPIService:
     async def get_meta_active_ads_tree(
         self,
         account_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Fetch the hierarchy of active campaigns → ad sets → ads.
+        Fetch the hierarchy of active campaigns → ad sets → ads with KPI metrics.
 
         Campaign/adset filter: effective_status=ACTIVE (full chain running).
         Ad inclusion rules:
           - PENDING_REVIEW / IN_PROCESS: always included (legitimately new/in review).
-          - ACTIVE: only included if ≥1 impression in the last 7 days, which filters
+          - ACTIVE: only included if ≥1 impression in the date range, which filters
             out phantom-active ads for past events that Meta leaves ACTIVE indefinitely.
+        KPIs (spend, impressions, clicks, leads, CPL) are pulled for the date range
+        (defaults to last 30 days) at each level of the hierarchy.
         """
         import json as _json
         from datetime import date, timedelta
@@ -552,8 +556,33 @@ class LiveAPIService:
         if not self.meta_token:
             return {"success": False, "error": "Meta API token not configured"}
 
-        today = date.today().isoformat()
-        seven_days_ago = (date.today() - timedelta(days=7)).isoformat()
+        today = end_date or date.today().isoformat()
+        period_start = start_date or (date.today() - timedelta(days=30)).isoformat()
+        insights_range = f"{{'since':'{period_start}','until':'{today}'}}"
+
+        def _extract_kpis(obj: dict) -> dict:
+            """Extract 30-day KPI metrics from a nested insights sub-response."""
+            rows = obj.get("insights", {}).get("data", [])
+            if not rows:
+                return {"spend": 0.0, "impressions": 0, "clicks": 0, "ctr": 0.0, "cpc": 0.0, "leads": 0, "cost_per_lead": 0.0}
+            row = rows[0]
+            spend = round(float(row.get("spend", 0) or 0), 2)
+            impressions = int(row.get("impressions", 0) or 0)
+            clicks = int(row.get("clicks", 0) or 0)
+            ctr = round(float(row.get("ctr", 0) or 0), 2)
+            cpc = round(float(row.get("cpc", 0) or 0), 2)
+            actions = row.get("actions") or []
+            leads = sum(int(a.get("value", 0)) for a in actions if a.get("action_type") == "lead")
+            cost_per_lead = round(spend / leads, 2) if leads > 0 else 0.0
+            return {
+                "spend": spend,
+                "impressions": impressions,
+                "clicks": clicks,
+                "ctr": ctr,
+                "cpc": cpc,
+                "leads": leads,
+                "cost_per_lead": cost_per_lead,
+            }
 
         effective_active_filter = _json.dumps([{
             "field": "effective_status",
@@ -580,29 +609,37 @@ class LiveAPIService:
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                # 1. Fetch effective-active campaigns
+                # 1. Fetch effective-active campaigns with 30-day KPIs
                 campaigns_raw = await paginate(client, f"{META_API_BASE}/{account_id}/campaigns", {
                     "access_token": self.meta_token,
-                    "fields": "id,name,status,effective_status",
+                    "fields": (
+                        "id,name,status,effective_status,"
+                        f"insights.time_range({insights_range})"
+                        "{spend,impressions,clicks,ctr,cpc,actions}"
+                    ),
                     "filtering": effective_active_filter,
                     "limit": 100,
                 })
 
-                # 2. Fetch effective-active ad sets
+                # 2. Fetch effective-active ad sets with 30-day KPIs
                 adsets_raw = await paginate(client, f"{META_API_BASE}/{account_id}/adsets", {
                     "access_token": self.meta_token,
-                    "fields": "id,name,status,effective_status,campaign_id",
+                    "fields": (
+                        "id,name,status,effective_status,campaign_id,"
+                        f"insights.time_range({insights_range})"
+                        "{spend,impressions,clicks,ctr,cpc,actions}"
+                    ),
                     "filtering": effective_active_filter,
                     "limit": 200,
                 })
 
-                # 3. Fetch ads with 7-day impressions for phantom-ad filtering
+                # 3. Fetch ads with 30-day insights for phantom-ad filtering + KPIs
                 ads_raw = await paginate(client, f"{META_API_BASE}/{account_id}/ads", {
                     "access_token": self.meta_token,
                     "fields": (
                         "id,name,status,effective_status,adset_id,campaign_id,"
-                        f"insights.time_range({{'since':'{seven_days_ago}','until':'{today}'}})"
-                        "{impressions}"
+                        f"insights.time_range({insights_range})"
+                        "{impressions,spend,clicks,ctr,cpc,actions}"
                     ),
                     "filtering": ads_filter,
                     "limit": 500,
@@ -623,7 +660,7 @@ class LiveAPIService:
 
             # Index qualifying ads by adset:
             # - PENDING_REVIEW / IN_PROCESS: always include
-            # - ACTIVE: only include if delivered in last 7 days (filters phantom-active)
+            # - ACTIVE: only include if delivered in last 30 days (filters phantom-active)
             ads_by_adset: Dict[str, List[dict]] = {}
             for ad in ads_raw:
                 es = ad.get("effective_status", "")
@@ -653,11 +690,13 @@ class LiveAPIService:
                         "name": adset.get("name", ""),
                         "status": adset.get("effective_status", adset.get("status", "")),
                         "ad_count": len(ads),
+                        **_extract_kpis(adset),
                         "ads": [
                             {
                                 "id": ad["id"],
                                 "name": ad.get("name", ""),
                                 "status": ad.get("effective_status", ad.get("status", "")),
+                                **_extract_kpis(ad),
                             }
                             for ad in ads
                         ],
@@ -671,6 +710,7 @@ class LiveAPIService:
                     "status": campaign.get("effective_status", campaign.get("status", "")),
                     "adset_count": len(adset_nodes),
                     "ad_count": total_ads,
+                    **_extract_kpis(campaign),
                     "adsets": adset_nodes,
                 })
 
