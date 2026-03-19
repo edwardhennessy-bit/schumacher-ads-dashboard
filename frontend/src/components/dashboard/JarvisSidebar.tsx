@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Send, Clock, Loader2, CheckCircle } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Send, Clock, Loader2, CheckCircle, Maximize2, Minimize2, X } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface JarvisSidebarProps {
@@ -60,6 +61,199 @@ function formatHour(h: number): string {
   return `${h - 12}:00 PM`;
 }
 
+/** Auto-resize a textarea to fit its content */
+function useAutoResize(value: string) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return ref;
+}
+
+// ---------------------------------------------------------------------------
+// Shared form content — rendered identically in sidebar and modal
+// ---------------------------------------------------------------------------
+
+interface JarvisFormProps {
+  prompt: string;
+  setPrompt: (v: string) => void;
+  channels: string[];
+  selectedChannel: string;
+  setSelectedChannel: (v: string) => void;
+  scheduleDay: string;
+  scheduleHour: number;
+  scheduleSaved: boolean;
+  isSending: boolean;
+  sendState: "idle" | "success" | "error";
+  sendMessage: string;
+  handleDayChange: (d: string) => void;
+  handleHourChange: (h: number) => void;
+  handleSend: () => void;
+  expanded?: boolean; // true = modal view
+}
+
+function JarvisForm({
+  prompt,
+  setPrompt,
+  channels,
+  selectedChannel,
+  setSelectedChannel,
+  scheduleDay,
+  scheduleHour,
+  scheduleSaved,
+  isSending,
+  sendState,
+  sendMessage,
+  handleDayChange,
+  handleHourChange,
+  handleSend,
+  expanded = false,
+}: JarvisFormProps) {
+  const textareaRef = useAutoResize(prompt);
+  const gridCols = expanded ? "grid-cols-3" : "grid-cols-2";
+
+  return (
+    <div className={`flex flex-col flex-1 min-h-0 ${expanded ? "gap-5" : "gap-4"}`}>
+      {/* Quick picks */}
+      <div>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          Quick report
+        </div>
+        <div className={`grid ${gridCols} gap-1.5`}>
+          {QUICK_PICKS.map((pick) => (
+            <button
+              key={pick.label}
+              onClick={() => setPrompt(pick.prompt)}
+              className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors text-left w-full
+                ${prompt === pick.prompt
+                  ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                  : "border-gray-200 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700"
+                }`}
+            >
+              {pick.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Custom prompt */}
+      <div className={expanded ? "flex-1 flex flex-col" : ""}>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          Or describe your report
+        </div>
+        <textarea
+          ref={textareaRef}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="e.g. Focus on remarketing performance and flag any ads with CPL above $60"
+          className={`text-sm border border-gray-200 rounded-lg p-2.5 w-full resize-none
+            focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none
+            overflow-hidden leading-relaxed
+            ${expanded ? "min-h-[180px] flex-1" : "min-h-[80px]"}`}
+          style={expanded ? {} : { maxHeight: "240px", overflowY: "auto" }}
+        />
+        {expanded && (
+          <p className="text-xs text-gray-400 mt-1">
+            Be as specific as you'd like — JARVIS will tailor the report to your request.
+          </p>
+        )}
+      </div>
+
+      {/* Send to channel */}
+      <div>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          Send to
+        </div>
+        <select
+          value={selectedChannel}
+          onChange={(e) => setSelectedChannel(e.target.value)}
+          className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
+        >
+          {channels.map((ch) => (
+            <option key={ch} value={ch}>
+              #{ch}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Auto-schedule */}
+      <div>
+        <div className="flex items-center gap-1.5 mb-2">
+          <Clock className="h-3.5 w-3.5 text-gray-400" />
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            Auto-schedule
+          </span>
+          {scheduleSaved && (
+            <span className="ml-auto text-xs text-green-600 font-medium">
+              ✓ Saved
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <select
+            value={scheduleDay}
+            onChange={(e) => handleDayChange(e.target.value)}
+            className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
+          >
+            {DAYS.map((d) => (
+              <option key={d} value={d}>
+                {DAY_LABELS[d]}
+              </option>
+            ))}
+          </select>
+          <select
+            value={scheduleHour}
+            onChange={(e) => handleHourChange(Number(e.target.value))}
+            className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
+          >
+            {Array.from({ length: 24 }, (_, i) => (
+              <option key={i} value={i}>
+                {formatHour(i)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Send button */}
+      <div className={expanded ? "pt-1" : ""}>
+        <button
+          onClick={handleSend}
+          disabled={isSending || !prompt.trim()}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-4 py-2.5 w-full font-medium text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSending ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Sending…
+            </>
+          ) : sendState === "success" ? (
+            <>
+              <CheckCircle className="h-4 w-4 text-green-300" />
+              <span className="text-green-100">{sendMessage}</span>
+            </>
+          ) : sendState === "error" ? (
+            <span className="text-red-200 text-xs">{sendMessage}</span>
+          ) : (
+            <>
+              <Send className="h-4 w-4" />
+              Send Report
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
 export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
   const [prompt, setPrompt] = useState("");
   const [channels, setChannels] = useState<string[]>(["jarvis-schumacher"]);
@@ -70,37 +264,49 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
   const [sendState, setSendState] = useState<"idle" | "success" | "error">("idle");
   const [sendMessage, setSendMessage] = useState("");
   const [scheduleSaved, setScheduleSaved] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const scheduleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load channels and schedule on mount
+  // Load channels + schedule on mount
   useEffect(() => {
     api.getSlackChannels().then((res) => {
-      if (res.channels && res.channels.length > 0) {
-        setChannels(res.channels);
-      }
+      if (res.channels?.length) setChannels(res.channels);
     }).catch(() => {});
 
-    api.getJarvisSchedule().then((schedule) => {
-      setSelectedChannel(schedule.channel);
-      setScheduleDay(schedule.day);
-      setScheduleHour(schedule.hour);
+    api.getJarvisSchedule().then((s) => {
+      setSelectedChannel(s.channel);
+      setScheduleDay(s.day);
+      setScheduleHour(s.hour);
     }).catch(() => {});
   }, []);
 
-  const handleScheduleChange = useCallback(
-    (channel: string, day: string, hour: number) => {
-      if (scheduleDebounceRef.current) clearTimeout(scheduleDebounceRef.current);
-      scheduleDebounceRef.current = setTimeout(async () => {
-        try {
-          await api.updateJarvisSchedule({ channel, day, hour });
-          setScheduleSaved(true);
-          setTimeout(() => setScheduleSaved(false), 2000);
-        } catch {}
-      }, 500);
-    },
-    []
-  );
+  // Close modal on Escape
+  useEffect(() => {
+    if (!isExpanded) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsExpanded(false);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isExpanded]);
+
+  // Lock body scroll when modal is open
+  useEffect(() => {
+    document.body.style.overflow = isExpanded ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [isExpanded]);
+
+  const handleScheduleChange = useCallback((channel: string, day: string, hour: number) => {
+    if (scheduleDebounceRef.current) clearTimeout(scheduleDebounceRef.current);
+    scheduleDebounceRef.current = setTimeout(async () => {
+      try {
+        await api.updateJarvisSchedule({ channel, day, hour });
+        setScheduleSaved(true);
+        setTimeout(() => setScheduleSaved(false), 2000);
+      } catch {}
+    }, 500);
+  }, []);
 
   const handleDayChange = (day: string) => {
     setScheduleDay(day);
@@ -139,137 +345,96 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
     }
   };
 
+  const sharedFormProps = {
+    prompt,
+    setPrompt,
+    channels,
+    selectedChannel,
+    setSelectedChannel,
+    scheduleDay,
+    scheduleHour,
+    scheduleSaved,
+    isSending,
+    sendState,
+    sendMessage,
+    handleDayChange,
+    handleHourChange,
+    handleSend,
+  };
+
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm w-80 shrink-0 flex flex-col">
-      {/* Header */}
-      <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-t-xl px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xl">🤖</span>
-          <div>
-            <div className="text-white font-bold text-sm">Ask JARVIS</div>
-            <div className="text-indigo-200 text-xs">Send a custom report to Slack</div>
+    <>
+      {/* ── Sidebar panel ───────────────────────────────────────────────── */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm w-80 shrink-0 flex flex-col">
+        {/* Header */}
+        <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-t-xl px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🤖</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-white font-bold text-sm">Ask JARVIS</div>
+              <div className="text-indigo-200 text-xs">Send a custom report to Slack</div>
+            </div>
+            <button
+              onClick={() => setIsExpanded(true)}
+              title="Expand to full view"
+              className="ml-auto text-indigo-200 hover:text-white transition-colors p-1 rounded hover:bg-white/10"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </button>
           </div>
+        </div>
+
+        {/* Body */}
+        <div className="px-4 py-3 flex-1 overflow-y-auto">
+          <JarvisForm {...sharedFormProps} expanded={false} />
         </div>
       </div>
 
-      {/* Body */}
-      <div className="px-4 py-3 space-y-4 flex-1 overflow-y-auto">
-        {/* Quick picks */}
-        <div>
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-            Quick report
-          </div>
-          <div className="grid grid-cols-2 gap-1.5">
-            {QUICK_PICKS.map((pick) => (
-              <button
-                key={pick.label}
-                onClick={() => setPrompt(pick.prompt)}
-                className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700 transition-colors text-left w-full"
-              >
-                {pick.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Custom prompt */}
-        <div>
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-            Or describe your report
-          </div>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. Focus on remarketing performance and flag any ads with CPL above $60"
-            className="text-sm border border-gray-200 rounded-lg p-2.5 w-full resize-none h-20 focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none"
-          />
-        </div>
-
-        {/* Send to channel */}
-        <div>
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-            Send to
-          </div>
-          <select
-            value={selectedChannel}
-            onChange={(e) => setSelectedChannel(e.target.value)}
-            className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
-          >
-            {channels.map((ch) => (
-              <option key={ch} value={ch}>
-                #{ch}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Auto-schedule */}
-        <div>
-          <div className="flex items-center gap-1.5 mb-2">
-            <Clock className="h-3.5 w-3.5 text-gray-400" />
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Auto-schedule
-            </span>
-            {scheduleSaved && (
-              <span className="ml-auto text-xs text-green-600 font-medium animate-pulse">
-                ✓ Saved
-              </span>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <select
-              value={scheduleDay}
-              onChange={(e) => handleDayChange(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
-            >
-              {DAYS.map((d) => (
-                <option key={d} value={d}>
-                  {DAY_LABELS[d]}
-                </option>
-              ))}
-            </select>
-            <select
-              value={scheduleHour}
-              onChange={(e) => handleHourChange(Number(e.target.value))}
-              className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
-            >
-              {Array.from({ length: 24 }, (_, i) => (
-                <option key={i} value={i}>
-                  {formatHour(i)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Footer — Send button */}
-      <div className="px-4 pb-4 pt-2 border-t border-gray-100">
-        <button
-          onClick={handleSend}
-          disabled={isSending || !prompt.trim()}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-4 py-2.5 w-full font-medium text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      {/* ── Full-screen modal ────────────────────────────────────────────── */}
+      {isExpanded && typeof window !== "undefined" && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-6"
+          onClick={(e) => { if (e.target === e.currentTarget) setIsExpanded(false); }}
         >
-          {isSending ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Sending...
-            </>
-          ) : sendState === "success" ? (
-            <>
-              <CheckCircle className="h-4 w-4 text-green-300" />
-              <span className="text-green-100">{sendMessage}</span>
-            </>
-          ) : sendState === "error" ? (
-            <span className="text-red-200 text-xs">{sendMessage}</span>
-          ) : (
-            <>
-              <Send className="h-4 w-4" />
-              Send Report
-            </>
-          )}
-        </button>
-      </div>
-    </div>
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+
+          {/* Modal panel */}
+          <div className="relative z-10 bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Modal header */}
+            <div className="bg-gradient-to-br from-indigo-600 to-purple-700 px-6 py-4 flex items-center gap-3 shrink-0">
+              <span className="text-2xl">🤖</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-white font-bold text-base">Ask JARVIS</div>
+                <div className="text-indigo-200 text-sm">
+                  Customize and send a report to Slack · {startDate} – {endDate}
+                </div>
+              </div>
+              <button
+                onClick={() => setIsExpanded(false)}
+                title="Collapse to sidebar"
+                className="text-indigo-200 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/10 flex items-center gap-1.5"
+              >
+                <Minimize2 className="h-4 w-4" />
+                <span className="text-xs">Collapse</span>
+              </button>
+              <button
+                onClick={() => setIsExpanded(false)}
+                title="Close"
+                className="text-indigo-200 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/10"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <JarvisForm {...sharedFormProps} expanded={true} />
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
   );
 }
