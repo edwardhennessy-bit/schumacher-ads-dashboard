@@ -221,8 +221,75 @@ class ApiClient {
     return this.fetch("/api/metrics/inventory");
   }
 
-  async getActiveAdsTree(): Promise<ActiveAdsTree> {
-    return this.fetch<ActiveAdsTree>("/api/metrics/active-ads-tree");
+  async getActiveAdsTree(startDate?: string, endDate?: string): Promise<ActiveAdsTree> {
+    const params = new URLSearchParams();
+    if (startDate) params.set("start_date", startDate);
+    if (endDate) params.set("end_date", endDate);
+    const qs = params.toString();
+    return this.fetch<ActiveAdsTree>(`/api/metrics/active-ads-tree${qs ? `?${qs}` : ""}`);
+  }
+
+  async getAiInsights(params: {
+    startDate: string;
+    endDate: string;
+    compareStart?: string;
+    compareEnd?: string;
+  }): Promise<{
+    success: boolean;
+    insights?: { headline: string; bullets: string[]; flags: string[] };
+    period?: string;
+    compare_period?: string;
+    error?: string;
+  }> {
+    return this.fetch("/api/jarvis/ai-insights", {
+      method: "POST",
+      body: JSON.stringify({
+        start_date: params.startDate,
+        end_date: params.endDate,
+        compare_start: params.compareStart,
+        compare_end: params.compareEnd,
+      }),
+    });
+  }
+
+  async getSlackChannels(): Promise<{ channels: string[] }> {
+    return this.fetch("/api/jarvis/channels");
+  }
+
+  async sendJarvisReport(params: {
+    prompt: string;
+    channel: string;
+    startDate: string;
+    endDate: string;
+    compareStart?: string;
+    compareEnd?: string;
+  }): Promise<{ success: boolean; message?: string; channel?: string; error?: string }> {
+    return this.fetch("/api/jarvis/send-report", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: params.prompt,
+        channel: params.channel,
+        start_date: params.startDate,
+        end_date: params.endDate,
+        compare_start: params.compareStart,
+        compare_end: params.compareEnd,
+      }),
+    });
+  }
+
+  async updateJarvisSchedule(params: {
+    channel: string;
+    day: string;
+    hour: number;
+  }): Promise<{ success: boolean }> {
+    return this.fetch("/api/jarvis/schedule", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async getJarvisSchedule(): Promise<{ channel: string; day: string; hour: number }> {
+    return this.fetch("/api/jarvis/schedule");
   }
 
   // Campaigns

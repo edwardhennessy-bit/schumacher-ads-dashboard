@@ -131,6 +131,15 @@ export default function DashboardPage() {
   const [activeAdsTree, setActiveAdsTree] = useState<ActiveCampaign[]>([]);
   const [activeAdsTreeLoading, setActiveAdsTreeLoading] = useState(false);
 
+  // Active Ads Health date range (defaults to MTD)
+  const [adsHealthStartDate, setAdsHealthStartDate] = useState<string>(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  });
+  const [adsHealthEndDate, setAdsHealthEndDate] = useState<string>(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+
   // Date range state
   const [selectedPreset, setSelectedPreset] = useState(DEFAULT_PRESET);
   const [customRange, setCustomRange] = useState<DateRange | null>(null);
@@ -184,10 +193,10 @@ export default function DashboardPage() {
     fetchData();
   };
 
-  const handleActiveAdsTreeOpen = async () => {
+  const handleActiveAdsTreeOpen = async (startDate: string, endDate: string) => {
     setActiveAdsTreeLoading(true);
     try {
-      const result = await api.getActiveAdsTree();
+      const result = await api.getActiveAdsTree(startDate, endDate);
       if (result.success) {
         setActiveAdsTree(result.campaigns);
       }
@@ -196,6 +205,11 @@ export default function DashboardPage() {
     } finally {
       setActiveAdsTreeLoading(false);
     }
+  };
+
+  const handleAdsHealthDateChange = (startDate: string, endDate: string) => {
+    setAdsHealthStartDate(startDate);
+    setAdsHealthEndDate(endDate);
   };
 
   const handleAcknowledge = async (alertId: string) => {
@@ -314,6 +328,9 @@ export default function DashboardPage() {
           campaigns={activeAdsTree}
           isLoading={activeAdsTreeLoading}
           onOpen={handleActiveAdsTreeOpen}
+          startDate={adsHealthStartDate}
+          endDate={adsHealthEndDate}
+          onDateChange={handleAdsHealthDateChange}
         />
 
         {/* Trend Chart */}

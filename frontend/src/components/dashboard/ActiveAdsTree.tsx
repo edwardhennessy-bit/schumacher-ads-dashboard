@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -11,15 +11,119 @@ import {
   Loader2,
 } from "lucide-react";
 import { ActiveCampaign, ActiveAdSet, ActiveAd } from "@/lib/api";
+import { AiInsightsPanel } from "@/components/dashboard/AiInsightsPanel";
+import { JarvisSidebar } from "@/components/dashboard/JarvisSidebar";
 
 interface ActiveAdsTreeProps {
   totalActiveAds: number;
   threshold: number;
   campaigns: ActiveCampaign[];
   isLoading: boolean;
-  onOpen: () => void;
+  onOpen: (startDate: string, endDate: string) => void;
+  startDate: string;
+  endDate: string;
+  onDateChange: (startDate: string, endDate: string) => void;
 }
 
+// --- Date preset helpers ---
+type Preset = {
+  label: string;
+  value: string;
+  getDates: () => { start: string; end: string };
+};
+
+function fmtDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+const today = () => new Date();
+
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function shiftBack(start: string, end: string): { start: string; end: string } {
+  const s = new Date(start);
+  const e = new Date(end);
+  const diffMs = e.getTime() - s.getTime();
+  const newEnd = new Date(s.getTime() - 1);
+  const newStart = new Date(newEnd.getTime() - diffMs);
+  return { start: fmtDate(newStart), end: fmtDate(newEnd) };
+}
+
+const PRESETS: Preset[] = [
+  {
+    label: "MTD",
+    value: "mtd",
+    getDates: () => {
+      const t = today();
+      return { start: fmtDate(startOfMonth(t)), end: fmtDate(t) };
+    },
+  },
+  {
+    label: "Last 7 Days",
+    value: "7d",
+    getDates: () => {
+      const t = today();
+      const s = new Date(t);
+      s.setDate(s.getDate() - 7);
+      return { start: fmtDate(s), end: fmtDate(t) };
+    },
+  },
+  {
+    label: "Last 14 Days",
+    value: "14d",
+    getDates: () => {
+      const t = today();
+      const s = new Date(t);
+      s.setDate(s.getDate() - 14);
+      return { start: fmtDate(s), end: fmtDate(t) };
+    },
+  },
+  {
+    label: "Last 30 Days",
+    value: "30d",
+    getDates: () => {
+      const t = today();
+      const s = new Date(t);
+      s.setDate(s.getDate() - 30);
+      return { start: fmtDate(s), end: fmtDate(t) };
+    },
+  },
+  {
+    label: "Last 60 Days",
+    value: "60d",
+    getDates: () => {
+      const t = today();
+      const s = new Date(t);
+      s.setDate(s.getDate() - 60);
+      return { start: fmtDate(s), end: fmtDate(t) };
+    },
+  },
+  {
+    label: "Last 90 Days",
+    value: "90d",
+    getDates: () => {
+      const t = today();
+      const s = new Date(t);
+      s.setDate(s.getDate() - 90);
+      return { start: fmtDate(s), end: fmtDate(t) };
+    },
+  },
+  {
+    label: "Last Month",
+    value: "last_month",
+    getDates: () => {
+      const t = today();
+      const firstOfThis = startOfMonth(t);
+      const lastOfPrev = new Date(firstOfThis.getTime() - 86400000);
+      const firstOfPrev = startOfMonth(lastOfPrev);
+      return { start: fmtDate(firstOfPrev), end: fmtDate(lastOfPrev) };
+    },
+  },
+];
+
+// --- KPI helpers ---
 function fmt$(n?: number) {
   if (n == null || n === 0) return null;
   return n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(0)}`;
@@ -210,17 +314,58 @@ export function ActiveAdsTree({
   campaigns,
   isLoading,
   onOpen,
+  startDate,
+  endDate,
+  onDateChange,
 }: ActiveAdsTreeProps) {
   const [open, setOpen] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState("mtd");
+  const [compareEnabled, setCompareEnabled] = useState(false);
+  const [comparePreset, setComparePreset] = useState("30d");
+  const [compareStart, setCompareStart] = useState<string | undefined>();
+  const [compareEnd, setCompareEnd] = useState<string | undefined>();
+
   const atThreshold = totalActiveAds >= threshold * 0.9;
 
   const handleToggle = () => {
     const next = !open;
     setOpen(next);
     if (next && campaigns.length === 0 && !isLoading) {
-      onOpen();
+      onOpen(startDate, endDate);
     }
   };
+
+  const handlePresetChange = (value: string) => {
+    setSelectedPreset(value);
+    const preset = PRESETS.find((p) => p.value === value);
+    if (preset) {
+      const { start, end } = preset.getDates();
+      onDateChange(start, end);
+      onOpen(start, end);
+    }
+  };
+
+  const handleComparePresetChange = (value: string) => {
+    setComparePreset(value);
+    const preset = PRESETS.find((p) => p.value === value);
+    if (preset) {
+      const { start, end } = preset.getDates();
+      setCompareStart(start);
+      setCompareEnd(end);
+    }
+  };
+
+  // When compare toggle turns on, compute comparison period as shifted-back version of main
+  useEffect(() => {
+    if (compareEnabled && startDate && endDate) {
+      const shifted = shiftBack(startDate, endDate);
+      setCompareStart(shifted.start);
+      setCompareEnd(shifted.end);
+    } else if (!compareEnabled) {
+      setCompareStart(undefined);
+      setCompareEnd(undefined);
+    }
+  }, [compareEnabled, startDate, endDate]);
 
   return (
     <div
@@ -263,26 +408,80 @@ export function ActiveAdsTree({
 
       {/* Tree body */}
       {open && (
-        <div className="border-t border-gray-100 px-4 py-4">
-          {isLoading ? (
-            <div className="flex items-center gap-2 text-sm text-gray-500 py-4 justify-center">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading active ads…
-            </div>
-          ) : campaigns.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-4">
-              No active campaigns found.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-xs text-gray-400 mb-3">
-                {campaigns.length} active {campaigns.length === 1 ? "campaign" : "campaigns"} · {totalActiveAds} active {totalActiveAds === 1 ? "ad" : "ads"} · KPIs = last 30 days · <code className="bg-gray-100 px-1 rounded">status = ACTIVE</code> (includes learning &amp; in review)
-              </p>
-              {campaigns.map((campaign) => (
-                <CampaignRow key={campaign.id} campaign={campaign} />
+        <div className="border-t border-gray-100 px-4 py-4 space-y-4">
+          {/* Date range controls */}
+          <div className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2 flex-wrap">
+            <select
+              value={selectedPreset}
+              onChange={(e) => handlePresetChange(e.target.value)}
+              className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:ring-1 focus:ring-indigo-300 outline-none"
+            >
+              {PRESETS.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.label}
+                </option>
               ))}
+            </select>
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={compareEnabled}
+                onChange={(e) => setCompareEnabled(e.target.checked)}
+                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-300"
+              />
+              Compare to prior period
+            </label>
+            {compareEnabled && (
+              <select
+                value={comparePreset}
+                onChange={(e) => handleComparePresetChange(e.target.value)}
+                className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:ring-1 focus:ring-indigo-300 outline-none"
+              >
+                {PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {/* AI Insights Panel */}
+          <AiInsightsPanel
+            startDate={startDate}
+            endDate={endDate}
+            compareStart={compareEnabled ? compareStart : undefined}
+            compareEnd={compareEnabled ? compareEnd : undefined}
+          />
+
+          {/* Main content: tree + JARVIS sidebar */}
+          <div className="flex gap-4 items-start">
+            {/* Campaign tree */}
+            <div className="flex-1 min-w-0">
+              {isLoading ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500 py-4 justify-center">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading active ads…
+                </div>
+              ) : campaigns.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">
+                  No active campaigns found.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-400 mb-3">
+                    {campaigns.length} active {campaigns.length === 1 ? "campaign" : "campaigns"} · {totalActiveAds} active {totalActiveAds === 1 ? "ad" : "ads"} · KPIs = selected period · <code className="bg-gray-100 px-1 rounded">status = ACTIVE</code> (includes learning &amp; in review)
+                  </p>
+                  {campaigns.map((campaign) => (
+                    <CampaignRow key={campaign.id} campaign={campaign} />
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+
+            {/* JARVIS Sidebar */}
+            <JarvisSidebar startDate={startDate} endDate={endDate} />
+          </div>
         </div>
       )}
     </div>
