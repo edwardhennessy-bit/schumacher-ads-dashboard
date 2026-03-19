@@ -607,43 +607,51 @@ class LiveAPIService:
                 params = {}
             return results
 
+        async def _fetch_tree(client: httpx.AsyncClient, insights_field: str):
+            """Fetch all three levels of the tree with the given insights field string."""
+            c = await paginate(client, f"{META_API_BASE}/{account_id}/campaigns", {
+                "access_token": self.meta_token,
+                "fields": f"id,name,status,effective_status,{insights_field}",
+                "filtering": effective_active_filter,
+                "limit": 100,
+            })
+            a = await paginate(client, f"{META_API_BASE}/{account_id}/adsets", {
+                "access_token": self.meta_token,
+                "fields": f"id,name,status,effective_status,campaign_id,{insights_field}",
+                "filtering": effective_active_filter,
+                "limit": 200,
+            })
+            d = await paginate(client, f"{META_API_BASE}/{account_id}/ads", {
+                "access_token": self.meta_token,
+                "fields": f"id,name,status,effective_status,adset_id,campaign_id,{insights_field}",
+                "filtering": ads_filter,
+                "limit": 500,
+            })
+            return c, a, d
+
+        # Build the insights sub-field using time_range; fall back to date_preset on error
+        time_range_field = (
+            f"insights.time_range({insights_range})"
+            "{spend,impressions,clicks,ctr,cpc,actions}"
+        )
+        preset_field = "insights.date_preset(last_30_days){spend,impressions,clicks,ctr,cpc,actions}"
+
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                # 1. Fetch effective-active campaigns with 30-day KPIs
-                campaigns_raw = await paginate(client, f"{META_API_BASE}/{account_id}/campaigns", {
-                    "access_token": self.meta_token,
-                    "fields": (
-                        "id,name,status,effective_status,"
-                        f"insights.time_range({insights_range})"
-                        "{spend,impressions,clicks,ctr,cpc,actions}"
-                    ),
-                    "filtering": effective_active_filter,
-                    "limit": 100,
-                })
-
-                # 2. Fetch effective-active ad sets with 30-day KPIs
-                adsets_raw = await paginate(client, f"{META_API_BASE}/{account_id}/adsets", {
-                    "access_token": self.meta_token,
-                    "fields": (
-                        "id,name,status,effective_status,campaign_id,"
-                        f"insights.time_range({insights_range})"
-                        "{spend,impressions,clicks,ctr,cpc,actions}"
-                    ),
-                    "filtering": effective_active_filter,
-                    "limit": 200,
-                })
-
-                # 3. Fetch ads with 30-day insights for phantom-ad filtering + KPIs
-                ads_raw = await paginate(client, f"{META_API_BASE}/{account_id}/ads", {
-                    "access_token": self.meta_token,
-                    "fields": (
-                        "id,name,status,effective_status,adset_id,campaign_id,"
-                        f"insights.time_range({insights_range})"
-                        "{impressions,spend,clicks,ctr,cpc,actions}"
-                    ),
-                    "filtering": ads_filter,
-                    "limit": 500,
-                })
+                try:
+                    # 1. Try with explicit time_range (supports custom date ranges)
+                    campaigns_raw, adsets_raw, ads_raw = await _fetch_tree(client, time_range_field)
+                except httpx.HTTPStatusError as exc:
+                    # Meta returns 400 when dates are in the future — fall back to last_30_days
+                    if exc.response.status_code == 400:
+                        logger.warning(
+                            "meta_tree_time_range_failed_using_preset",
+                            error=str(exc),
+                            dates=f"{period_start} to {today}",
+                        )
+                        campaigns_raw, adsets_raw, ads_raw = await _fetch_tree(client, preset_field)
+                    else:
+                        raise
 
             logger.info(
                 "meta_active_ads_tree_fetched",
