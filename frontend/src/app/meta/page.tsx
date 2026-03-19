@@ -193,10 +193,10 @@ export default function DashboardPage() {
     fetchData();
   };
 
-  const handleActiveAdsTreeOpen = async (startDate: string, endDate: string) => {
+  const handleActiveAdsTreeOpen = async (startDate: string, endDate: string, mode: "active" | "with_spend" = "active") => {
     setActiveAdsTreeLoading(true);
     try {
-      const result = await api.getActiveAdsTree(startDate, endDate);
+      const result = await api.getActiveAdsTree(startDate, endDate, mode);
       if (result.success) {
         setActiveAdsTree(result.campaigns);
       }

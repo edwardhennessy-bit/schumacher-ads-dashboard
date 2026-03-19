@@ -221,12 +221,12 @@ class ApiClient {
     return this.fetch("/api/metrics/inventory");
   }
 
-  async getActiveAdsTree(startDate?: string, endDate?: string): Promise<ActiveAdsTree> {
+  async getActiveAdsTree(startDate?: string, endDate?: string, mode: "active" | "with_spend" = "active"): Promise<ActiveAdsTree> {
     const params = new URLSearchParams();
     if (startDate) params.set("start_date", startDate);
     if (endDate) params.set("end_date", endDate);
-    const qs = params.toString();
-    return this.fetch<ActiveAdsTree>(`/api/metrics/active-ads-tree${qs ? `?${qs}` : ""}`);
+    params.set("mode", mode);
+    return this.fetch<ActiveAdsTree>(`/api/metrics/active-ads-tree?${params.toString()}`);
   }
 
   async getAiInsights(params: {

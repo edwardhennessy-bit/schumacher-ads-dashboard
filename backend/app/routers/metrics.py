@@ -309,11 +309,12 @@ async def get_active_ads_performance():
 async def get_active_ads_tree(
     start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+    mode: str = Query("active", description="'active' = currently active ads only; 'with_spend' = all ads that earned spend in the period"),
 ):
     """
-    Return the full hierarchy of active campaigns → active ad sets → active ads.
-    Each level uses effective_status=ACTIVE so only truly active objects appear.
-    Optional start_date/end_date query params set the KPI window (default: last 30 days).
+    Return the full hierarchy of campaigns → ad sets → ads with KPI metrics.
+    mode=active (default): effective_status=ACTIVE chain only.
+    mode=with_spend: no status filter — includes any paused/archived ad that earned spend in the period.
     """
     settings = get_settings()
     if not settings.meta_access_token:
@@ -322,7 +323,9 @@ async def get_active_ads_tree(
     try:
         live_service = LiveAPIService(meta_access_token=settings.meta_access_token)
         account_id = settings.meta_ad_account_id or "act_142003632"
-        result = await live_service.get_meta_active_ads_tree(account_id, start_date=start_date, end_date=end_date)
+        result = await live_service.get_meta_active_ads_tree(
+            account_id, start_date=start_date, end_date=end_date, mode=mode
+        )
         return result
     except Exception as e:
         logger.error("active_ads_tree_error", error=str(e))

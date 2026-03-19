@@ -538,15 +538,18 @@ class LiveAPIService:
         account_id: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        mode: str = "active",
     ) -> Dict[str, Any]:
         """
-        Fetch the hierarchy of active campaigns → ad sets → ads with KPI metrics.
+        Fetch the hierarchy of campaigns → ad sets → ads with KPI metrics.
 
-        Campaign/adset filter: effective_status=ACTIVE (full chain running).
-        Ad inclusion rules:
-          - PENDING_REVIEW / IN_PROCESS: always included (legitimately new/in review).
-          - ACTIVE: only included if ≥1 impression in the date range, which filters
-            out phantom-active ads for past events that Meta leaves ACTIVE indefinitely.
+        mode="active" (default):
+          - Campaign/adset filter: effective_status=ACTIVE
+          - Ads: PENDING_REVIEW/IN_PROCESS always included; ACTIVE only if ≥1 impression
+        mode="with_spend":
+          - No status filters — fetches all campaigns/adsets/ads regardless of status
+          - Includes only objects where spend > 0 in the date range (great for lookbacks)
+
         KPIs (spend, impressions, clicks, leads, CPL) are pulled for the date range
         (defaults to last 30 days) at each level of the hierarchy.
         """
@@ -590,11 +593,14 @@ class LiveAPIService:
             "value": ["ACTIVE"],
         }])
 
-        ads_filter = _json.dumps([{
+        ads_status_filter = _json.dumps([{
             "field": "effective_status",
             "operator": "IN",
             "value": ["ACTIVE", "PENDING_REVIEW", "IN_PROCESS"],
         }])
+
+        # with_spend mode skips all status filters — spend > 0 is the inclusion criterion
+        use_status_filter = (mode == "active")
 
         async def paginate(client: httpx.AsyncClient, url: str, params: dict) -> List[dict]:
             results = []
@@ -609,24 +615,32 @@ class LiveAPIService:
 
         async def _fetch_tree(client: httpx.AsyncClient, insights_field: str):
             """Fetch all three levels of the tree with the given insights field string."""
-            c = await paginate(client, f"{META_API_BASE}/{account_id}/campaigns", {
+            c_params: dict = {
                 "access_token": self.meta_token,
                 "fields": f"id,name,status,effective_status,{insights_field}",
-                "filtering": effective_active_filter,
                 "limit": 100,
-            })
-            a = await paginate(client, f"{META_API_BASE}/{account_id}/adsets", {
+            }
+            if use_status_filter:
+                c_params["filtering"] = effective_active_filter
+            c = await paginate(client, f"{META_API_BASE}/{account_id}/campaigns", c_params)
+
+            a_params: dict = {
                 "access_token": self.meta_token,
                 "fields": f"id,name,status,effective_status,campaign_id,{insights_field}",
-                "filtering": effective_active_filter,
                 "limit": 200,
-            })
-            d = await paginate(client, f"{META_API_BASE}/{account_id}/ads", {
+            }
+            if use_status_filter:
+                a_params["filtering"] = effective_active_filter
+            a = await paginate(client, f"{META_API_BASE}/{account_id}/adsets", a_params)
+
+            d_params: dict = {
                 "access_token": self.meta_token,
                 "fields": f"id,name,status,effective_status,adset_id,campaign_id,{insights_field}",
-                "filtering": ads_filter,
                 "limit": 500,
-            })
+            }
+            if use_status_filter:
+                d_params["filtering"] = ads_status_filter
+            d = await paginate(client, f"{META_API_BASE}/{account_id}/ads", d_params)
             return c, a, d
 
         # Build the insights sub-field using time_range; fall back to date_preset on error
@@ -666,18 +680,22 @@ class LiveAPIService:
                 cid = adset.get("campaign_id", "")
                 adsets_by_campaign.setdefault(cid, []).append(adset)
 
-            # Index qualifying ads by adset:
-            # - PENDING_REVIEW / IN_PROCESS: always include
-            # - ACTIVE: only include if delivered in last 30 days (filters phantom-active)
+            # Index qualifying ads by adset.
+            # active mode:    PENDING_REVIEW/IN_PROCESS always included; ACTIVE only if ≥1 impression
+            # with_spend mode: any ad with spend > $0 in the date range (status-agnostic)
             ads_by_adset: Dict[str, List[dict]] = {}
             for ad in ads_raw:
                 es = ad.get("effective_status", "")
-                if es in ("PENDING_REVIEW", "IN_PROCESS"):
-                    qualifies = True
+                rows = ad.get("insights", {}).get("data", [])
+                if mode == "with_spend":
+                    spend = float(rows[0].get("spend", 0)) if rows else 0.0
+                    qualifies = spend > 0
                 else:
-                    rows = ad.get("insights", {}).get("data", [])
-                    impressions = int(rows[0].get("impressions", 0)) if rows else 0
-                    qualifies = impressions > 0
+                    if es in ("PENDING_REVIEW", "IN_PROCESS"):
+                        qualifies = True
+                    else:
+                        impressions = int(rows[0].get("impressions", 0)) if rows else 0
+                        qualifies = impressions > 0
                 if qualifies:
                     asid = ad.get("adset_id", "")
                     ads_by_adset.setdefault(asid, []).append(ad)
@@ -723,10 +741,11 @@ class LiveAPIService:
                 })
 
             total_active_ads = sum(c["ad_count"] for c in tree)
-            logger.info("meta_active_ads_tree", account_id=account_id, campaigns=len(tree), total_ads=total_active_ads)
+            logger.info("meta_active_ads_tree", account_id=account_id, campaigns=len(tree), total_ads=total_active_ads, mode=mode)
             return {
                 "success": True,
                 "total_active_ads": total_active_ads,
+                "mode": mode,
                 "campaigns": tree,
             }
 

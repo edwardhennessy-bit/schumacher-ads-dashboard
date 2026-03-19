@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Send, Clock, Loader2, CheckCircle, Maximize2, Minimize2, X, Plus, Hash, Info } from "lucide-react";
+import { Send, Clock, Calendar, Loader2, CheckCircle, Maximize2, Minimize2, X, Plus, Hash, Info } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface JarvisSidebarProps {
@@ -114,13 +114,14 @@ interface JarvisFormProps {
   scheduleDay: string;
   scheduleHour: number;
   scheduleTimezone: string;
-  scheduleSaved: boolean;
+  scheduleSaveState: "idle" | "saving" | "saved" | "error";
   isSending: boolean;
   sendState: "idle" | "success" | "error";
   sendMessage: string;
   handleDayChange: (d: string) => void;
   handleHourChange: (h: number) => void;
   handleTimezoneChange: (tz: string) => void;
+  handleScheduleSave: () => void;
   handleSend: () => void;
   expanded?: boolean; // true = modal view
 }
@@ -135,13 +136,14 @@ function JarvisForm({
   scheduleDay,
   scheduleHour,
   scheduleTimezone,
-  scheduleSaved,
+  scheduleSaveState,
   isSending,
   sendState,
   sendMessage,
   handleDayChange,
   handleHourChange,
   handleTimezoneChange,
+  handleScheduleSave,
   handleSend,
   expanded = false,
 }: JarvisFormProps) {
@@ -155,7 +157,7 @@ function JarvisForm({
   const [addChannelError, setAddChannelError] = useState("");
 
   const handleAddChannel = async () => {
-    const ch = newChannelName.trim().lstrip?.("#") ?? newChannelName.trim().replace(/^#/, "");
+    const ch = newChannelName.trim().replace(/^#/, "");
     if (!ch) return;
     setAddingChannel(true);
     setAddChannelError("");
@@ -307,11 +309,6 @@ function JarvisForm({
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
             Auto-schedule
           </span>
-          {scheduleSaved && (
-            <span className="ml-auto text-xs text-green-600 font-medium">
-              ✓ Saved
-            </span>
-          )}
         </div>
         {/* Row 1: day + time */}
         <div className="flex gap-2 mb-2">
@@ -342,7 +339,7 @@ function JarvisForm({
         <select
           value={scheduleTimezone}
           onChange={(e) => handleTimezoneChange(e.target.value)}
-          className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
+          className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white mb-2"
         >
           {TIMEZONES.map((tz) => (
             <option key={tz.value} value={tz.value}>
@@ -350,6 +347,28 @@ function JarvisForm({
             </option>
           ))}
         </select>
+        {/* Set Schedule button */}
+        <button
+          onClick={handleScheduleSave}
+          disabled={scheduleSaveState === "saving"}
+          className={`w-full text-sm rounded-lg px-4 py-2 font-medium flex items-center justify-center gap-2 transition-colors border
+            ${scheduleSaveState === "saved"
+              ? "border-green-300 bg-green-50 text-green-700"
+              : scheduleSaveState === "error"
+              ? "border-red-300 bg-red-50 text-red-700"
+              : "border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+            }`}
+        >
+          {scheduleSaveState === "saving" ? (
+            <><Loader2 className="h-3.5 w-3.5 animate-spin" />Saving…</>
+          ) : scheduleSaveState === "saved" ? (
+            <><CheckCircle className="h-3.5 w-3.5" />Schedule saved!</>
+          ) : scheduleSaveState === "error" ? (
+            <>Failed to save — try again</>
+          ) : (
+            <><Calendar className="h-3.5 w-3.5" />Set Schedule</>
+          )}
+        </button>
       </div>
 
       {/* Send button */}
@@ -397,10 +416,8 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
   const [isSending, setIsSending] = useState(false);
   const [sendState, setSendState] = useState<"idle" | "success" | "error">("idle");
   const [sendMessage, setSendMessage] = useState("");
-  const [scheduleSaved, setScheduleSaved] = useState(false);
+  const [scheduleSaveState, setScheduleSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [isExpanded, setIsExpanded] = useState(false);
-
-  const scheduleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load channels + schedule on mount
   useEffect(() => {
@@ -432,30 +449,33 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
     return () => { document.body.style.overflow = ""; };
   }, [isExpanded]);
 
-  const handleScheduleChange = useCallback((channel: string, day: string, hour: number, timezone: string) => {
-    if (scheduleDebounceRef.current) clearTimeout(scheduleDebounceRef.current);
-    scheduleDebounceRef.current = setTimeout(async () => {
-      try {
-        await api.updateJarvisSchedule({ channel, day, hour, timezone });
-        setScheduleSaved(true);
-        setTimeout(() => setScheduleSaved(false), 2000);
-      } catch {}
-    }, 500);
-  }, []);
-
   const handleDayChange = (day: string) => {
     setScheduleDay(day);
-    handleScheduleChange(selectedChannel, day, scheduleHour, scheduleTimezone);
   };
 
   const handleHourChange = (hour: number) => {
     setScheduleHour(hour);
-    handleScheduleChange(selectedChannel, scheduleDay, hour, scheduleTimezone);
   };
 
   const handleTimezoneChange = (timezone: string) => {
     setScheduleTimezone(timezone);
-    handleScheduleChange(selectedChannel, scheduleDay, scheduleHour, timezone);
+  };
+
+  const handleScheduleSave = async () => {
+    setScheduleSaveState("saving");
+    try {
+      await api.updateJarvisSchedule({
+        channel: selectedChannel,
+        day: scheduleDay,
+        hour: scheduleHour,
+        timezone: scheduleTimezone,
+      });
+      setScheduleSaveState("saved");
+      setTimeout(() => setScheduleSaveState("idle"), 2500);
+    } catch {
+      setScheduleSaveState("error");
+      setTimeout(() => setScheduleSaveState("idle"), 3000);
+    }
   };
 
   const handleSend = async () => {
@@ -495,13 +515,14 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
     scheduleDay,
     scheduleHour,
     scheduleTimezone,
-    scheduleSaved,
+    scheduleSaveState,
     isSending,
     sendState,
     sendMessage,
     handleDayChange,
     handleHourChange,
     handleTimezoneChange,
+    handleScheduleSave,
     handleSend,
   };
 

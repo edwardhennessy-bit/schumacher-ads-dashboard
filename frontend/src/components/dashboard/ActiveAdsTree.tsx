@@ -19,7 +19,7 @@ interface ActiveAdsTreeProps {
   threshold: number;
   campaigns: ActiveCampaign[];
   isLoading: boolean;
-  onOpen: (startDate: string, endDate: string) => void;
+  onOpen: (startDate: string, endDate: string, mode: "active" | "with_spend") => void;
   startDate: string;
   endDate: string;
   onDateChange: (startDate: string, endDate: string) => void;
@@ -249,7 +249,7 @@ function AdSetRow({ adset }: { adset: ActiveAdSet }) {
       {open && (
         <div className="ml-8 border-l border-gray-100 pl-2 mb-1">
           {adset.ads.length === 0 ? (
-            <p className="text-xs text-gray-400 py-1 px-2">No active ads</p>
+            <p className="text-xs text-gray-400 py-1 px-2">No ads</p>
           ) : (
             adset.ads.map((ad) => <AdRow key={ad.id} ad={ad} />)
           )}
@@ -279,7 +279,7 @@ function CampaignRow({ campaign }: { campaign: ActiveCampaign }) {
           </span>
           <div className="flex items-center gap-3 shrink-0 ml-2 text-xs text-gray-400">
             <span>{campaign.adset_count} ad {campaign.adset_count === 1 ? "set" : "sets"}</span>
-            <span className="font-medium text-gray-600">{campaign.ad_count} active {campaign.ad_count === 1 ? "ad" : "ads"}</span>
+            <span className="font-medium text-gray-600">{campaign.ad_count} {campaign.ad_count === 1 ? "ad" : "ads"}</span>
           </div>
         </div>
         <div className="ml-6">
@@ -296,7 +296,7 @@ function CampaignRow({ campaign }: { campaign: ActiveCampaign }) {
       {open && (
         <div className="px-2 py-1">
           {campaign.adsets.length === 0 ? (
-            <p className="text-xs text-gray-400 py-2 px-3">No active ad sets</p>
+            <p className="text-xs text-gray-400 py-2 px-3">No ad sets</p>
           ) : (
             campaign.adsets.map((adset) => (
               <AdSetRow key={adset.id} adset={adset} />
@@ -320,6 +320,7 @@ export function ActiveAdsTree({
 }: ActiveAdsTreeProps) {
   const [open, setOpen] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState("mtd");
+  const [adsMode, setAdsMode] = useState<"active" | "with_spend">("active");
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [comparePreset, setComparePreset] = useState("30d");
   const [compareStart, setCompareStart] = useState<string | undefined>();
@@ -331,7 +332,7 @@ export function ActiveAdsTree({
     const next = !open;
     setOpen(next);
     if (next && campaigns.length === 0 && !isLoading) {
-      onOpen(startDate, endDate);
+      onOpen(startDate, endDate, adsMode);
     }
   };
 
@@ -341,8 +342,13 @@ export function ActiveAdsTree({
     if (preset) {
       const { start, end } = preset.getDates();
       onDateChange(start, end);
-      onOpen(start, end);
+      onOpen(start, end, adsMode);
     }
+  };
+
+  const handleAdsModeChange = (newMode: "active" | "with_spend") => {
+    setAdsMode(newMode);
+    onOpen(startDate, endDate, newMode);
   };
 
   const handleComparePresetChange = (value: string) => {
@@ -387,7 +393,9 @@ export function ActiveAdsTree({
           className={`h-5 w-5 shrink-0 ${atThreshold ? "text-red-400" : "text-gray-400"}`}
         />
         <div className="flex-1 flex items-center gap-4">
-          <span className="font-semibold text-gray-800">Active Ads</span>
+          <span className="font-semibold text-gray-800">
+            {adsMode === "with_spend" ? "Ads with Spend" : "Active Ads"}
+          </span>
           <span
             className={`text-sm font-medium ${
               atThreshold ? "text-red-600" : "text-gray-600"
@@ -411,6 +419,29 @@ export function ActiveAdsTree({
         <div className="border-t border-gray-100 px-4 py-4 space-y-4">
           {/* Date range controls */}
           <div className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2 flex-wrap">
+            {/* Ads mode toggle */}
+            <div className="flex rounded-md border border-gray-200 bg-white overflow-hidden shrink-0">
+              <button
+                onClick={() => handleAdsModeChange("active")}
+                className={`text-xs px-2.5 py-1 transition-colors ${
+                  adsMode === "active"
+                    ? "bg-indigo-600 text-white font-medium"
+                    : "text-gray-500 hover:bg-gray-50"
+                }`}
+              >
+                Active Ads
+              </button>
+              <button
+                onClick={() => handleAdsModeChange("with_spend")}
+                className={`text-xs px-2.5 py-1 border-l border-gray-200 transition-colors ${
+                  adsMode === "with_spend"
+                    ? "bg-indigo-600 text-white font-medium"
+                    : "text-gray-500 hover:bg-gray-50"
+                }`}
+              >
+                Ads with Spend
+              </button>
+            </div>
             <select
               value={selectedPreset}
               onChange={(e) => handlePresetChange(e.target.value)}
@@ -470,7 +501,11 @@ export function ActiveAdsTree({
               ) : (
                 <div className="space-y-2">
                   <p className="text-xs text-gray-400 mb-3">
-                    {campaigns.length} active {campaigns.length === 1 ? "campaign" : "campaigns"} · {totalActiveAds} active {totalActiveAds === 1 ? "ad" : "ads"} · KPIs = selected period · <code className="bg-gray-100 px-1 rounded">status = ACTIVE</code> (includes learning &amp; in review)
+                    {campaigns.length} {campaigns.length === 1 ? "campaign" : "campaigns"} · {totalActiveAds} {totalActiveAds === 1 ? "ad" : "ads"} · KPIs = selected period ·{" "}
+                    {adsMode === "with_spend"
+                      ? "all ads with spend > $0 (includes paused & archived)"
+                      : <><code className="bg-gray-100 px-1 rounded">status = ACTIVE</code> (includes learning &amp; in review)</>
+                    }
                   </p>
                   {campaigns.map((campaign) => (
                     <CampaignRow key={campaign.id} campaign={campaign} />
