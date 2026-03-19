@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/jarvis", tags=["jarvis"])
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
 SCHEDULE_FILE = DATA_DIR / "jarvis_schedule.json"
 
-DEFAULT_SCHEDULE = {"channel": "jarvis-schumacher", "day": "monday", "hour": 9}
+DEFAULT_SCHEDULE = {"channel": "jarvis-schumacher", "day": "monday", "hour": 9, "timezone": "America/New_York"}
 
 DEFAULT_CHANNELS = ["jarvis-schumacher", "paid-media", "paid-media-team", "general"]
 CHANNELS_FILE = DATA_DIR / "jarvis_channels.json"
@@ -71,12 +71,13 @@ async def update_schedule(body: dict):
     channel = body.get("channel", DEFAULT_SCHEDULE["channel"])
     day = body.get("day", DEFAULT_SCHEDULE["day"])
     hour = body.get("hour", DEFAULT_SCHEDULE["hour"])
+    timezone = body.get("timezone", DEFAULT_SCHEDULE["timezone"])
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    config = {"channel": channel, "day": day, "hour": hour}
+    config = {"channel": channel, "day": day, "hour": hour, "timezone": timezone}
     SCHEDULE_FILE.write_text(json.dumps(config, indent=2))
 
-    return {"success": True, "channel": channel, "day": day, "hour": hour}
+    return {"success": True, "channel": channel, "day": day, "hour": hour, "timezone": timezone}
 
 
 @router.get("/schedule")
@@ -85,6 +86,9 @@ async def get_schedule():
     if SCHEDULE_FILE.exists():
         try:
             config = json.loads(SCHEDULE_FILE.read_text())
+            # Back-fill timezone for configs saved before this field was added
+            if "timezone" not in config:
+                config["timezone"] = DEFAULT_SCHEDULE["timezone"]
             return config
         except Exception:
             pass

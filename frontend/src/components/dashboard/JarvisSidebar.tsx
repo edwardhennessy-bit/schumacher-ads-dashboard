@@ -54,6 +54,33 @@ const DAY_LABELS: Record<string, string> = {
   sunday: "Sunday",
 };
 
+const TIMEZONES = [
+  { value: "America/New_York",    label: "ET — Eastern" },
+  { value: "America/Chicago",     label: "CT — Central" },
+  { value: "America/Denver",      label: "MT — Mountain" },
+  { value: "America/Phoenix",     label: "MT — Mountain (no DST)" },
+  { value: "America/Los_Angeles", label: "PT — Pacific" },
+  { value: "America/Anchorage",   label: "AKT — Alaska" },
+  { value: "Pacific/Honolulu",    label: "HST — Hawaii" },
+  { value: "Europe/London",       label: "GMT/BST — London" },
+  { value: "Europe/Paris",        label: "CET — Central Europe" },
+  { value: "Asia/Dubai",          label: "GST — Dubai" },
+  { value: "Asia/Kolkata",        label: "IST — India" },
+  { value: "Asia/Singapore",      label: "SGT — Singapore" },
+  { value: "Asia/Tokyo",          label: "JST — Tokyo" },
+  { value: "Australia/Sydney",    label: "AEST — Sydney" },
+  { value: "Pacific/Auckland",    label: "NZST — Auckland" },
+];
+
+/** Detect the browser's local timezone, falling back to ET */
+function detectTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
+  } catch {
+    return "America/New_York";
+  }
+}
+
 function formatHour(h: number): string {
   if (h === 0) return "12:00 AM";
   if (h < 12) return `${h}:00 AM`;
@@ -86,12 +113,14 @@ interface JarvisFormProps {
   setSelectedChannel: (v: string) => void;
   scheduleDay: string;
   scheduleHour: number;
+  scheduleTimezone: string;
   scheduleSaved: boolean;
   isSending: boolean;
   sendState: "idle" | "success" | "error";
   sendMessage: string;
   handleDayChange: (d: string) => void;
   handleHourChange: (h: number) => void;
+  handleTimezoneChange: (tz: string) => void;
   handleSend: () => void;
   expanded?: boolean; // true = modal view
 }
@@ -105,12 +134,14 @@ function JarvisForm({
   setSelectedChannel,
   scheduleDay,
   scheduleHour,
+  scheduleTimezone,
   scheduleSaved,
   isSending,
   sendState,
   sendMessage,
   handleDayChange,
   handleHourChange,
+  handleTimezoneChange,
   handleSend,
   expanded = false,
 }: JarvisFormProps) {
@@ -282,7 +313,8 @@ function JarvisForm({
             </span>
           )}
         </div>
-        <div className="flex gap-2">
+        {/* Row 1: day + time */}
+        <div className="flex gap-2 mb-2">
           <select
             value={scheduleDay}
             onChange={(e) => handleDayChange(e.target.value)}
@@ -306,6 +338,18 @@ function JarvisForm({
             ))}
           </select>
         </div>
+        {/* Row 2: timezone */}
+        <select
+          value={scheduleTimezone}
+          onChange={(e) => handleTimezoneChange(e.target.value)}
+          className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
+        >
+          {TIMEZONES.map((tz) => (
+            <option key={tz.value} value={tz.value}>
+              {tz.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Send button */}
@@ -349,6 +393,7 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
   const [selectedChannel, setSelectedChannel] = useState("jarvis-schumacher");
   const [scheduleDay, setScheduleDay] = useState("monday");
   const [scheduleHour, setScheduleHour] = useState(9);
+  const [scheduleTimezone, setScheduleTimezone] = useState<string>(detectTimezone);
   const [isSending, setIsSending] = useState(false);
   const [sendState, setSendState] = useState<"idle" | "success" | "error">("idle");
   const [sendMessage, setSendMessage] = useState("");
@@ -367,6 +412,7 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
       setSelectedChannel(s.channel);
       setScheduleDay(s.day);
       setScheduleHour(s.hour);
+      if (s.timezone) setScheduleTimezone(s.timezone);
     }).catch(() => {});
   }, []);
 
@@ -386,11 +432,11 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
     return () => { document.body.style.overflow = ""; };
   }, [isExpanded]);
 
-  const handleScheduleChange = useCallback((channel: string, day: string, hour: number) => {
+  const handleScheduleChange = useCallback((channel: string, day: string, hour: number, timezone: string) => {
     if (scheduleDebounceRef.current) clearTimeout(scheduleDebounceRef.current);
     scheduleDebounceRef.current = setTimeout(async () => {
       try {
-        await api.updateJarvisSchedule({ channel, day, hour });
+        await api.updateJarvisSchedule({ channel, day, hour, timezone });
         setScheduleSaved(true);
         setTimeout(() => setScheduleSaved(false), 2000);
       } catch {}
@@ -399,12 +445,17 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
 
   const handleDayChange = (day: string) => {
     setScheduleDay(day);
-    handleScheduleChange(selectedChannel, day, scheduleHour);
+    handleScheduleChange(selectedChannel, day, scheduleHour, scheduleTimezone);
   };
 
   const handleHourChange = (hour: number) => {
     setScheduleHour(hour);
-    handleScheduleChange(selectedChannel, scheduleDay, hour);
+    handleScheduleChange(selectedChannel, scheduleDay, hour, scheduleTimezone);
+  };
+
+  const handleTimezoneChange = (timezone: string) => {
+    setScheduleTimezone(timezone);
+    handleScheduleChange(selectedChannel, scheduleDay, scheduleHour, timezone);
   };
 
   const handleSend = async () => {
@@ -443,12 +494,14 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
     setSelectedChannel,
     scheduleDay,
     scheduleHour,
+    scheduleTimezone,
     scheduleSaved,
     isSending,
     sendState,
     sendMessage,
     handleDayChange,
     handleHourChange,
+    handleTimezoneChange,
     handleSend,
   };
 

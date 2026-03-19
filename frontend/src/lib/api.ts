@@ -288,6 +288,7 @@ class ApiClient {
     channel: string;
     day: string;
     hour: number;
+    timezone: string;
   }): Promise<{ success: boolean }> {
     return this.fetch("/api/jarvis/schedule", {
       method: "POST",
@@ -295,7 +296,7 @@ class ApiClient {
     });
   }
 
-  async getJarvisSchedule(): Promise<{ channel: string; day: string; hour: number }> {
+  async getJarvisSchedule(): Promise<{ channel: string; day: string; hour: number; timezone: string }> {
     return this.fetch("/api/jarvis/schedule");
   }
 
