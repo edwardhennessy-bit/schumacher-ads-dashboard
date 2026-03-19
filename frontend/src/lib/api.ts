@@ -300,6 +300,26 @@ class ApiClient {
     return this.fetch("/api/jarvis/schedule");
   }
 
+  async jarvisChat(payload: {
+    section: string;
+    messages: Array<{ role: string; content: string }>;
+    startDate?: string;
+    endDate?: string;
+    sectionData?: unknown;
+  }): Promise<{ success: boolean; reply?: string; error?: string }> {
+    return this.fetch("/api/jarvis/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        section: payload.section,
+        messages: payload.messages,
+        start_date: payload.startDate,
+        end_date: payload.endDate,
+        section_data: payload.sectionData ?? null,
+      }),
+    });
+  }
+
   // Campaigns
   async getCampaigns(dateRange?: DateRange): Promise<Campaign[]> {
     return this.fetch<Campaign[]>(`/api/campaigns${this.dateParams(dateRange)}`);

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { ActiveCampaign, ActiveAdSet, ActiveAd } from "@/lib/api";
 import { AiInsightsPanel } from "@/components/dashboard/AiInsightsPanel";
-import { JarvisSidebar } from "@/components/dashboard/JarvisSidebar";
+import { AskJarvisButton } from "@/components/dashboard/JarvisDrawer";
 
 interface ActiveAdsTreeProps {
   totalActiveAds: number;
@@ -409,9 +409,12 @@ export function ActiveAdsTree({
             </span>
           )}
         </div>
-        <span className="text-xs text-gray-400 shrink-0">
-          {open ? "Collapse" : "View breakdown"}
-        </span>
+        <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+          <AskJarvisButton section="active_ads" />
+          <span className="text-xs text-gray-400">
+            {open ? "Collapse" : "View breakdown"}
+          </span>
+        </div>
       </button>
 
       {/* Tree body */}
@@ -485,37 +488,31 @@ export function ActiveAdsTree({
             compareEnd={compareEnabled ? compareEnd : undefined}
           />
 
-          {/* Main content: tree + JARVIS sidebar */}
-          <div className="flex gap-4 items-start">
-            {/* Campaign tree */}
-            <div className="flex-1 min-w-0">
-              {isLoading ? (
-                <div className="flex items-center gap-2 text-sm text-gray-500 py-4 justify-center">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading active ads…
-                </div>
-              ) : campaigns.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-4">
-                  No active campaigns found.
+          {/* Campaign tree */}
+          <div>
+            {isLoading ? (
+              <div className="flex items-center gap-2 text-sm text-gray-500 py-4 justify-center">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading active ads…
+              </div>
+            ) : campaigns.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4">
+                No active campaigns found.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-400 mb-3">
+                  {campaigns.length} {campaigns.length === 1 ? "campaign" : "campaigns"} · {totalActiveAds} {totalActiveAds === 1 ? "ad" : "ads"} · KPIs = selected period ·{" "}
+                  {adsMode === "with_spend"
+                    ? "all ads with spend > $0 (includes paused & archived)"
+                    : <><code className="bg-gray-100 px-1 rounded">status = ACTIVE</code> (includes learning &amp; in review)</>
+                  }
                 </p>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-xs text-gray-400 mb-3">
-                    {campaigns.length} {campaigns.length === 1 ? "campaign" : "campaigns"} · {totalActiveAds} {totalActiveAds === 1 ? "ad" : "ads"} · KPIs = selected period ·{" "}
-                    {adsMode === "with_spend"
-                      ? "all ads with spend > $0 (includes paused & archived)"
-                      : <><code className="bg-gray-100 px-1 rounded">status = ACTIVE</code> (includes learning &amp; in review)</>
-                    }
-                  </p>
-                  {campaigns.map((campaign) => (
-                    <CampaignRow key={campaign.id} campaign={campaign} />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* JARVIS Sidebar */}
-            <JarvisSidebar startDate={startDate} endDate={endDate} />
+                {campaigns.map((campaign) => (
+                  <CampaignRow key={campaign.id} campaign={campaign} />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

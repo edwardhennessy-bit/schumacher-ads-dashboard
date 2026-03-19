@@ -7,6 +7,8 @@ import { TrendChart } from "@/components/dashboard/TrendChart";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
 import { AlertsFeed } from "@/components/dashboard/AlertsFeed";
 import { ActiveAdsTree } from "@/components/dashboard/ActiveAdsTree";
+import { JarvisProvider } from "@/context/JarvisContext";
+import { JarvisDrawer, AskJarvisButton } from "@/components/dashboard/JarvisDrawer";
 import {
   DollarSign,
   MousePointer,
@@ -231,117 +233,144 @@ export default function DashboardPage() {
   const chartTitle = `${formatDateRangeLabel(selectedPreset, customRange)} Performance Trends`;
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header
-        title="Dashboard"
-        subtitle={`Meta Ads Performance Overview${!apiConnected ? " (Demo Mode)" : ""}`}
-        onRefresh={handleRefresh}
-        isLoading={isLoading}
-        selectedPreset={selectedPreset}
-        customRange={customRange}
-        onPresetChange={handlePresetChange}
-        onCustomRangeChange={handleCustomRangeChange}
-      />
-
-      <div className="p-6 space-y-6">
-        {/* Lead Metrics Row - Highlighted */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          <MetricCard
-            title="Total Leads"
-            value={formatNumber(metrics.leads)}
-            change={metrics.leadsChange}
-            icon={<UserPlus className="h-4 w-4" />}
-            className="border-2 border-green-200 bg-green-50/50"
-          />
-          <MetricCard
-            title="Blended CPL"
-            value={formatCurrency(metrics.costPerLead)}
-            change={metrics.costPerLeadChange}
-            invertTrend
-            icon={<Users className="h-4 w-4" />}
-            className="border-2 border-green-200 bg-green-50/50"
-          />
-          <MetricCard
-            title="Remarketing CPL"
-            value={formatCurrency(metrics.remarketingCpl || 0)}
-            subtitle={`${formatNumber(metrics.remarketingLeads || 0)} leads`}
-            icon={<RefreshCw className="h-4 w-4" />}
-            className="border-2 border-blue-200 bg-blue-50/50"
-          />
-          <MetricCard
-            title="Prospecting CPL"
-            value={formatCurrency(metrics.prospectingCpl || 0)}
-            subtitle={`${formatNumber(metrics.prospectingLeads || 0)} leads`}
-            icon={<Megaphone className="h-4 w-4" />}
-            className="border-2 border-purple-200 bg-purple-50/50"
-          />
-          <MetricCard
-            title="Active Ads"
-            value={`${metrics.activeAds} / ${metrics.activeAdsThreshold || 250}`}
-            subtitle={metrics.activeAds >= (metrics.activeAdsThreshold || 250) ? "At threshold!" : `${(metrics.activeAdsThreshold || 250) - metrics.activeAds} remaining`}
-            icon={<Layers className="h-4 w-4" />}
-            className={metrics.activeAds >= (metrics.activeAdsThreshold || 250) * 0.9
-              ? "border-2 border-red-200 bg-red-50/50"
-              : "border-2 border-gray-200"}
-          />
-        </div>
-
-        {/* Standard Metric Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-          <MetricCard
-            title="Total Spend"
-            value={formatCurrency(metrics.spend)}
-            change={metrics.spendChange}
-            icon={<DollarSign className="h-4 w-4" />}
-          />
-          <MetricCard
-            title="Impressions"
-            value={formatNumber(metrics.impressions)}
-            change={metrics.impressionsChange}
-            icon={<Eye className="h-4 w-4" />}
-          />
-          <MetricCard
-            title="Clicks"
-            value={formatNumber(metrics.clicks)}
-            change={metrics.clicksChange}
-            icon={<MousePointer className="h-4 w-4" />}
-          />
-          <MetricCard
-            title="CTR"
-            value={formatPercent(metrics.ctr)}
-            change={metrics.ctrChange}
-            icon={<TrendingUp className="h-4 w-4" />}
-          />
-          <MetricCard
-            title="CPC"
-            value={formatCurrency(metrics.cpc)}
-            change={metrics.cpcChange}
-            invertTrend
-            icon={<Target className="h-4 w-4" />}
-          />
-        </div>
-
-        {/* Active Ads Drill-Down */}
-        <ActiveAdsTree
-          totalActiveAds={metrics.activeAds}
-          threshold={metrics.activeAdsThreshold || 250}
-          campaigns={activeAdsTree}
-          isLoading={activeAdsTreeLoading}
-          onOpen={handleActiveAdsTreeOpen}
-          startDate={adsHealthStartDate}
-          endDate={adsHealthEndDate}
-          onDateChange={handleAdsHealthDateChange}
+    <JarvisProvider>
+      <div className="min-h-screen bg-background">
+        <Header
+          title="Dashboard"
+          subtitle={`Meta Ads Performance Overview${!apiConnected ? " (Demo Mode)" : ""}`}
+          onRefresh={handleRefresh}
+          isLoading={isLoading}
+          selectedPreset={selectedPreset}
+          customRange={customRange}
+          onPresetChange={handlePresetChange}
+          onCustomRangeChange={handleCustomRangeChange}
         />
 
-        {/* Trend Chart */}
-        <TrendChart data={trends} title={chartTitle} />
+        <div className="p-6 space-y-6">
+          {/* KPI Summary Section */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">KPI Summary</h2>
+              <AskJarvisButton section="kpi_cards" />
+            </div>
+            {/* Lead Metrics Row - Highlighted */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
+              <MetricCard
+                title="Total Leads"
+                value={formatNumber(metrics.leads)}
+                change={metrics.leadsChange}
+                icon={<UserPlus className="h-4 w-4" />}
+                className="border-2 border-green-200 bg-green-50/50"
+              />
+              <MetricCard
+                title="Blended CPL"
+                value={formatCurrency(metrics.costPerLead)}
+                change={metrics.costPerLeadChange}
+                invertTrend
+                icon={<Users className="h-4 w-4" />}
+                className="border-2 border-green-200 bg-green-50/50"
+              />
+              <MetricCard
+                title="Remarketing CPL"
+                value={formatCurrency(metrics.remarketingCpl || 0)}
+                subtitle={`${formatNumber(metrics.remarketingLeads || 0)} leads`}
+                icon={<RefreshCw className="h-4 w-4" />}
+                className="border-2 border-blue-200 bg-blue-50/50"
+              />
+              <MetricCard
+                title="Prospecting CPL"
+                value={formatCurrency(metrics.prospectingCpl || 0)}
+                subtitle={`${formatNumber(metrics.prospectingLeads || 0)} leads`}
+                icon={<Megaphone className="h-4 w-4" />}
+                className="border-2 border-purple-200 bg-purple-50/50"
+              />
+              <MetricCard
+                title="Active Ads"
+                value={`${metrics.activeAds} / ${metrics.activeAdsThreshold || 250}`}
+                subtitle={metrics.activeAds >= (metrics.activeAdsThreshold || 250) ? "At threshold!" : `${(metrics.activeAdsThreshold || 250) - metrics.activeAds} remaining`}
+                icon={<Layers className="h-4 w-4" />}
+                className={metrics.activeAds >= (metrics.activeAdsThreshold || 250) * 0.9
+                  ? "border-2 border-red-200 bg-red-50/50"
+                  : "border-2 border-gray-200"}
+              />
+            </div>
+            {/* Standard Metric Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+              <MetricCard
+                title="Total Spend"
+                value={formatCurrency(metrics.spend)}
+                change={metrics.spendChange}
+                icon={<DollarSign className="h-4 w-4" />}
+              />
+              <MetricCard
+                title="Impressions"
+                value={formatNumber(metrics.impressions)}
+                change={metrics.impressionsChange}
+                icon={<Eye className="h-4 w-4" />}
+              />
+              <MetricCard
+                title="Clicks"
+                value={formatNumber(metrics.clicks)}
+                change={metrics.clicksChange}
+                icon={<MousePointer className="h-4 w-4" />}
+              />
+              <MetricCard
+                title="CTR"
+                value={formatPercent(metrics.ctr)}
+                change={metrics.ctrChange}
+                icon={<TrendingUp className="h-4 w-4" />}
+              />
+              <MetricCard
+                title="CPC"
+                value={formatCurrency(metrics.cpc)}
+                change={metrics.cpcChange}
+                invertTrend
+                icon={<Target className="h-4 w-4" />}
+              />
+            </div>
+          </div>
 
-        {/* Campaign Table — Full Width */}
-        <CampaignTable campaigns={campaigns} />
+          {/* Active Ads Drill-Down */}
+          <ActiveAdsTree
+            totalActiveAds={metrics.activeAds}
+            threshold={metrics.activeAdsThreshold || 250}
+            campaigns={activeAdsTree}
+            isLoading={activeAdsTreeLoading}
+            onOpen={handleActiveAdsTreeOpen}
+            startDate={adsHealthStartDate}
+            endDate={adsHealthEndDate}
+            onDateChange={handleAdsHealthDateChange}
+          />
 
-        {/* Audit Alerts */}
-        <AlertsFeed alerts={alerts} onAcknowledge={handleAcknowledge} />
+          {/* Trend Chart Section */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Performance Trends</h2>
+              <AskJarvisButton section="trend_chart" />
+            </div>
+            <TrendChart data={trends} title={chartTitle} />
+          </div>
+
+          {/* Campaign Table Section */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Campaign Performance</h2>
+              <AskJarvisButton section="campaign_table" />
+            </div>
+            <CampaignTable campaigns={campaigns} />
+          </div>
+
+          {/* Alerts Section */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Audit Alerts</h2>
+              <AskJarvisButton section="alerts" />
+            </div>
+            <AlertsFeed alerts={alerts} onAcknowledge={handleAcknowledge} />
+          </div>
+        </div>
       </div>
-    </div>
+      <JarvisDrawer />
+    </JarvisProvider>
   );
 }

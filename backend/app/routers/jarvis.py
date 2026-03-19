@@ -3,16 +3,19 @@ JARVIS API Router — AI insights and custom Slack report endpoints.
 """
 
 import json
+import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from app.config import get_settings
 from app.services.live_api import LiveAPIService, DateRange
 
 router = APIRouter(prefix="/api/jarvis", tags=["jarvis"])
+logger = logging.getLogger(__name__)
 
 # Path to schedule config file
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
@@ -336,4 +339,119 @@ async def send_report(body: dict):
         }
 
     except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ── Multi-turn chat endpoint ──────────────────────────────────────────────────
+
+class ChatMessageModel(BaseModel):
+    role: str
+    content: str
+
+class JarvisChatRequest(BaseModel):
+    section: str
+    messages: List[ChatMessageModel]
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    section_data: Optional[dict] = None
+
+SECTION_SYSTEM_PROMPTS = {
+    "kpi_cards": """You are JARVIS, an AI assistant for a Meta Ads performance dashboard for Schumacher Homes (a homebuilder). You are helping the user understand and communicate their KPI summary metrics.
+
+You have access to key performance indicators including: Total Leads, Blended CPL (Cost Per Lead), Remarketing CPL & leads, Prospecting CPL & leads, Total Spend, Impressions, Clicks, CTR, CPC, and Active Ads count.
+
+You can:
+- Interpret and summarize current KPI performance
+- Flag anomalies or concerns vs. typical benchmarks
+- Analyze CPL performance by segment
+- Assess spend pacing against budget
+- Write Slack-ready summaries and overviews
+- Suggest which metrics deserve attention
+
+Ask clarifying questions when needed before generating reports. Be concise and data-driven.""",
+
+    "active_ads": """You are JARVIS, an AI assistant for a Meta Ads performance dashboard for Schumacher Homes. You are helping the user analyze the Active Ads hierarchy (campaigns → ad sets → ads).
+
+The ads are segmented into: Remarketing, Prospecting, and Visit/TOF campaigns. For Visit campaigns, engagement metrics (clicks, CTR, CPC) are the primary KPIs. For all other campaigns, leads and CPL are primary. Flag any CPL above $70.
+
+You can:
+- Generate top 5 / bottom 5 campaign and ad reports
+- Flag high CPL campaigns and ads
+- Analyze remarketing vs prospecting performance
+- Review Visit/TOF campaign click efficiency
+- Write Slack-ready health reports
+
+Ask clarifying questions when needed. Be specific and actionable.""",
+
+    "trend_chart": """You are JARVIS, an AI assistant for a Meta Ads performance dashboard for Schumacher Homes. You are helping the user analyze performance trend data over time.
+
+You can:
+- Summarize trend patterns and highlight significant changes
+- Identify anomalies, spikes, or drops and suggest causes
+- Compare performance across periods
+- Identify best and worst performing days/weeks
+- Write Slack-ready trend summaries
+
+Ask clarifying questions when needed. Focus on actionable insights.""",
+
+    "campaign_table": """You are JARVIS, an AI assistant for a Meta Ads performance dashboard for Schumacher Homes. You are helping the user analyze the campaign performance table.
+
+The table contains campaign-level data including spend, leads, CPL, clicks, CTR, and CPC. Campaigns span remarketing, prospecting, and Visit/TOF types.
+
+You can:
+- Rank campaigns by any metric
+- Identify top and bottom performers
+- Analyze spend allocation and efficiency
+- Flag underperforming campaigns
+- Write formatted Slack summaries
+
+Ask clarifying questions when needed. Be specific and data-driven.""",
+
+    "alerts": """You are JARVIS, an AI assistant for a Meta Ads performance dashboard for Schumacher Homes. You are helping the user understand and respond to performance alerts.
+
+Alerts may include: budget pacing issues, CPL thresholds exceeded, frequency fatigue, ad rejection, or other anomalies.
+
+You can:
+- Explain what each alert means and why it matters
+- Prioritize alerts by urgency
+- Recommend specific actions for each alert
+- Write Slack-ready alert summaries with action plans
+
+Be clear, direct, and actionable.""",
+}
+
+@router.post("/chat")
+async def jarvis_chat(request: JarvisChatRequest):
+    """Multi-turn conversational chat with JARVIS, context-aware per section."""
+    import anthropic as _anthropic
+
+    settings = get_settings()
+    anthropic_key = settings.anthropic_api_key if hasattr(settings, "anthropic_api_key") else os.environ.get("ANTHROPIC_API_KEY", "")
+    if not anthropic_key:
+        return {"success": False, "error": "Anthropic API key not configured"}
+
+    system_prompt = SECTION_SYSTEM_PROMPTS.get(request.section, SECTION_SYSTEM_PROMPTS["kpi_cards"])
+
+    # Append section data context to system prompt if available
+    if request.section_data:
+        import json as _json
+        system_prompt += f"\n\nCurrent section data (use this as context for your responses):\n{_json.dumps(request.section_data, indent=2)[:8000]}"
+
+    if request.start_date and request.end_date:
+        system_prompt += f"\n\nDate range: {request.start_date} to {request.end_date}"
+
+    try:
+        client = _anthropic.Anthropic(api_key=anthropic_key)
+        messages = [{"role": m.role, "content": m.content} for m in request.messages]
+
+        response = client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=2048,
+            system=system_prompt,
+            messages=messages,
+        )
+        reply = response.content[0].text if response.content else "No response generated."
+        return {"success": True, "reply": reply}
+    except Exception as e:
+        logger.error("jarvis_chat_error: error=%s section=%s", str(e), request.section)
         return {"success": False, "error": str(e)}
