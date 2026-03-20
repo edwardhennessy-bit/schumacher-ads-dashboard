@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   X, Maximize2, Minimize2, Send, Trash2, Clock, Calendar,
-  Loader2, CheckCircle, Bot, Hash, Plus, Info, ChevronDown, ChevronUp,
+  Loader2, CheckCircle, Bot, Hash, Plus, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { useJarvis, Section } from "@/context/JarvisContext";
 import { api } from "@/lib/api";
@@ -101,7 +101,6 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
 
   const [input, setInput] = useState("");
   const [showSchedule, setShowSchedule] = useState(false);
-  const [showSlack, setShowSlack] = useState(true);
   const [showAddChannel, setShowAddChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
   const [addingChannel, setAddingChannel] = useState(false);
@@ -281,77 +280,24 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
       </div>
 
       {/* ── Send to Slack ── */}
-      <div className="border-t border-gray-100 shrink-0">
+      <div className="border-t border-gray-100 px-3 py-2.5 shrink-0">
+        <div className="flex items-center gap-2 mb-2">
+          <Hash className="h-3 w-3 text-gray-400" />
+          <span className="text-xs text-gray-500 font-medium">Sending to</span>
+          <span className="text-xs font-semibold text-[#f27038]">#{selectedChannel}</span>
+          <span className="text-xs text-gray-400 ml-auto">(change in schedule ↓)</span>
+        </div>
         <button
-          onClick={() => setShowSlack(v => !v)}
-          className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:bg-gray-50 transition-colors"
+          onClick={handleSendToSlack}
+          disabled={!hasLastAssistant || slackSendState === "sending"}
+          className={`w-full text-sm rounded-lg px-4 py-2 font-medium flex items-center justify-center gap-2 transition-colors
+            ${slackSendState === "sent" ? "bg-green-600 text-white" : slackSendState === "error" ? "bg-red-100 text-red-700 border border-red-300" : "bg-[#f27038] hover:bg-[#d4612e] text-white disabled:opacity-40"}`}
         >
-          <Hash className="h-3 w-3" />
-          Send to Slack
-          {showSlack ? <ChevronUp className="h-3 w-3 ml-auto" /> : <ChevronDown className="h-3 w-3 ml-auto" />}
+          {slackSendState === "sending" ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Sending…</>
+           : slackSendState === "sent" ? <><CheckCircle className="h-3.5 w-3.5" />Sent to Slack!</>
+           : slackSendState === "error" ? <>Failed — try again</>
+           : <><Send className="h-3.5 w-3.5" />Send Response to Slack</>}
         </button>
-        {showSlack && (
-          <div className="px-3 pb-3 space-y-2">
-            <select
-              value={selectedChannel}
-              onChange={(e) => {
-                if (e.target.value === "__add__") setShowAddChannel(true);
-                else { setSelectedChannel(e.target.value); setShowAddChannel(false); }
-              }}
-              className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-[#f27038]/50 outline-none bg-white"
-            >
-              {channels.map(ch => <option key={ch} value={ch}>#{ch}</option>)}
-              <option value="__add__">＋ Add a Slack channel…</option>
-            </select>
-            {showAddChannel && (
-              <div className="rounded-lg border border-[#f27038]/20 bg-[#f27038]/5 p-3 space-y-2">
-                <div className="flex gap-2">
-                  <Info className="h-3.5 w-3.5 text-[#f27038] shrink-0 mt-0.5" />
-                  <div className="text-xs text-gray-700 space-y-0.5">
-                    <p className="font-semibold">Invite JARVIS to the channel first:</p>
-                    <ol className="list-decimal list-inside text-gray-600 space-y-0.5">
-                      <li>Open the Slack channel</li>
-                      <li>Type <code className="bg-[#f27038]/10 px-1 rounded">/invite @Jarvis</code> and send</li>
-                      <li>Enter the channel name below</li>
-                    </ol>
-                  </div>
-                </div>
-                <div className="flex gap-1.5">
-                  <div className="flex items-center gap-1 flex-1 border border-[#f27038]/30 rounded-lg bg-white px-2 focus-within:ring-2 focus-within:ring-[#f27038]/50">
-                    <Hash className="h-3 w-3 text-[#f27038] shrink-0" />
-                    <input
-                      type="text"
-                      value={newChannelName}
-                      onChange={(e) => setNewChannelName(e.target.value.replace(/^#/, "").replace(/\s/g, "-").toLowerCase())}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleAddChannel(); }}
-                      placeholder="channel-name"
-                      className="text-sm py-1.5 flex-1 outline-none bg-transparent placeholder-gray-400"
-                      autoFocus
-                    />
-                  </div>
-                  <button onClick={handleAddChannel} disabled={!newChannelName.trim() || addingChannel} className="text-xs bg-[#f27038] hover:bg-[#d4612e] text-white px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 flex items-center gap-1">
-                    {addingChannel ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}Add
-                  </button>
-                  <button onClick={() => { setShowAddChannel(false); setNewChannelName(""); setAddChannelError(""); }} className="text-gray-400 hover:text-gray-600 px-2 rounded-lg">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-                {addChannelError && <p className="text-xs text-red-600">{addChannelError}</p>}
-              </div>
-            )}
-            <button
-              onClick={handleSendToSlack}
-              disabled={!hasLastAssistant || slackSendState === "sending"}
-              className={`w-full text-sm rounded-lg px-4 py-2 font-medium flex items-center justify-center gap-2 transition-colors
-                ${slackSendState === "sent" ? "bg-green-600 text-white" : slackSendState === "error" ? "bg-red-100 text-red-700 border border-red-300" : "bg-[#f27038] hover:bg-[#d4612e] text-white disabled:opacity-40"}`}
-            >
-              {slackSendState === "sending" ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Sending…</>
-               : slackSendState === "sent" ? <><CheckCircle className="h-3.5 w-3.5" />Sent to Slack!</>
-               : slackSendState === "error" ? <>Failed — try again</>
-               : <><Send className="h-3.5 w-3.5" />Send Last Response to Slack</>}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* ── Auto-schedule ── */}
