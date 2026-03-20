@@ -233,13 +233,32 @@ async def get_ai_insights(body: dict):
 @router.post("/send-report")
 async def send_report(body: dict):
     """
-    Generate a custom AI report from user prompt and post to Slack.
+    Post a JARVIS response directly to Slack (or optionally re-generate from prompt).
+    If 'message' is provided, it is posted directly without calling Claude again.
     """
     settings = get_settings()
 
     if not settings.slack_bot_token:
         return {"success": False, "error": "Slack bot not configured"}
 
+    channel: str = body.get("channel", "jarvis-schumacher")
+    message: Optional[str] = body.get("message")  # Pre-generated content to post directly
+
+    # ── Fast path: post existing JARVIS response directly ─────────────────────
+    if message:
+        try:
+            from slack_sdk.web.async_client import AsyncWebClient
+            clean_channel = channel.lstrip("#")
+            slack_client = AsyncWebClient(token=settings.slack_bot_token)
+            await slack_client.chat_postMessage(
+                channel=f"#{clean_channel}",
+                text=f"*JARVIS Report*\n\n{message}",
+            )
+            return {"success": True, "message": f"Report sent to #{clean_channel}", "channel": clean_channel}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ── Slow path: re-generate from prompt via Claude (legacy) ────────────────
     if not settings.anthropic_api_key:
         return {"success": False, "error": "AI insights not configured"}
 

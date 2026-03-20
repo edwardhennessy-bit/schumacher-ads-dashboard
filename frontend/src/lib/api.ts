@@ -265,7 +265,8 @@ class ApiClient {
   }
 
   async sendJarvisReport(params: {
-    prompt: string;
+    message?: string;  // Pre-generated content — posts directly without re-running Claude
+    prompt?: string;   // Legacy: re-generate from prompt (slow)
     channel: string;
     startDate: string;
     endDate: string;
@@ -275,6 +276,7 @@ class ApiClient {
     return this.fetch("/api/jarvis/send-report", {
       method: "POST",
       body: JSON.stringify({
+        message: params.message,
         prompt: params.prompt,
         channel: params.channel,
         start_date: params.startDate,

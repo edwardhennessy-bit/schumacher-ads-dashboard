@@ -155,7 +155,8 @@ export function JarvisProvider({ children }: { children: React.ReactNode }) {
     if (!lastAssistant) return;
     setSlackSendState("sending");
     try {
-      await api.sendJarvisReport({ prompt: lastAssistant.content, channel: selectedChannel, startDate, endDate });
+      // Pass the existing JARVIS response directly — avoids re-running Claude
+      await api.sendJarvisReport({ message: lastAssistant.content, channel: selectedChannel, startDate, endDate });
       setSlackSendState("sent");
       setTimeout(() => setSlackSendState("idle"), 3000);
     } catch {
