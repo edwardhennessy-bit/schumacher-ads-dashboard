@@ -311,7 +311,6 @@ export default function GoogleDashboardPage() {
           <ActiveAdsTree
             platform="google"
             totalActiveAds={adsTreeData?.total_active_ads ?? 0}
-            threshold={200}
             campaigns={adsTreeData?.campaigns ?? []}
             isLoading={adsTreeLoading}
             onOpen={handleActiveAdsTreeOpen}

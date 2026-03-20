@@ -17,7 +17,7 @@ import { AskJarvisButton } from "@/components/dashboard/JarvisDrawer";
 
 interface ActiveAdsTreeProps {
   totalActiveAds: number;
-  threshold: number;
+  threshold?: number;
   campaigns: ActiveCampaign[];
   isLoading: boolean;
   onOpen: (startDate: string, endDate: string, mode: "active" | "with_spend") => void;
@@ -329,6 +329,8 @@ export function ActiveAdsTree({
   platform = "meta",
 }: ActiveAdsTreeProps) {
   const groupLabel = platform === "meta" ? "Ad Sets" : "Ad Groups";
+  // Threshold only applies on Meta (Meta has an ad account ad limit)
+  const hasThreshold = platform === "meta" && threshold != null && threshold > 0;
   const [open, setOpen] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState("mtd");
   const [adsMode, setAdsMode] = useState<"active" | "with_spend">("active");
@@ -337,7 +339,7 @@ export function ActiveAdsTree({
   const [compareStart, setCompareStart] = useState<string | undefined>();
   const [compareEnd, setCompareEnd] = useState<string | undefined>();
 
-  const atThreshold = totalActiveAds >= threshold * 0.9;
+  const atThreshold = hasThreshold && totalActiveAds >= (threshold ?? 0) * 0.9;
 
   const handleToggle = () => {
     const next = !open;
@@ -412,7 +414,7 @@ export function ActiveAdsTree({
               atThreshold ? "text-red-600" : "text-gray-600"
             }`}
           >
-            {totalActiveAds} / {threshold}
+            {hasThreshold ? `${totalActiveAds} / ${threshold}` : totalActiveAds}
           </span>
           {atThreshold && (
             <span className="text-xs font-medium text-red-500 bg-red-100 px-2 py-0.5 rounded-full">
