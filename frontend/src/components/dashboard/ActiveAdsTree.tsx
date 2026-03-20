@@ -131,6 +131,11 @@ function fmt$(n?: number) {
   return n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(0)}`;
 }
 
+function fmtCpc(n?: number) {
+  if (n == null || n === 0) return null;
+  return n >= 1000 ? `$${(n / 1000).toFixed(2)}k` : `$${n.toFixed(2)}`;
+}
+
 function fmtNum(n?: number) {
   if (n == null || n === 0) return null;
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
@@ -178,7 +183,7 @@ function KpiBar({ spend, clicks, ctr, cpc, leads, cost_per_lead, size = "sm" }: 
       ) : null}
       {cpc ? (
         <span className={`${pill} bg-gray-100 text-gray-600 font-medium`}>
-          {fmt$(cpc)} CPC
+          {fmtCpc(cpc)} CPC
         </span>
       ) : null}
       {leads ? (

@@ -375,74 +375,94 @@ class JarvisChatRequest(BaseModel):
     section_data: Optional[dict] = None
 
 SECTION_SYSTEM_PROMPTS = {
-    "kpi_cards": """You are JARVIS, an AI assistant for a Meta Ads performance dashboard for Schumacher Homes (a homebuilder). You are helping the user understand and communicate their KPI summary metrics.
+    "kpi_cards": """You are JARVIS, an expert paid media analyst AI for Schumacher Homes (a custom homebuilder). You are embedded in their paid media dashboard and have direct access to live Meta Ads data provided below.
 
-You have access to key performance indicators including: Total Leads, Blended CPL (Cost Per Lead), Remarketing CPL & leads, Prospecting CPL & leads, Total Spend, Impressions, Clicks, CTR, CPC, and Active Ads count.
+IMPORTANT: Live dashboard data will be injected into this prompt. Always use those exact numbers — never say you don't have access to data.
 
-You can:
-- Interpret and summarize current KPI performance
-- Flag anomalies or concerns vs. typical benchmarks
-- Analyze CPL performance by segment
-- Assess spend pacing against budget
-- Write Slack-ready summaries and overviews
-- Suggest which metrics deserve attention
+Key metrics available: Total Leads, Blended CPL (Cost Per Lead), Remarketing CPL & leads, Prospecting CPL & leads, Total Spend, Impressions, Clicks, CTR, CPC, and Active Ads count.
 
-Ask clarifying questions when needed before generating reports. Be concise and data-driven.""",
+Campaign context:
+- Remarketing campaigns: CPL target ~$50-70. Flag anything above $70.
+- Prospecting campaigns: CPL target ~$100-150. Higher CPL is expected.
+- Visit/TOF campaigns: Engagement-focused — use CTR and CPC as primary KPIs, NOT leads/CPL.
 
-    "active_ads": """You are JARVIS, an AI assistant for a Meta Ads performance dashboard for Schumacher Homes. You are helping the user analyze the Active Ads hierarchy (campaigns → ad sets → ads).
+You can: summarize KPI performance, flag anomalies, analyze CPL by segment, assess spend pacing, write Slack-ready summaries. Be concise, specific, and always reference actual numbers from the data.""",
 
-The ads are segmented into: Remarketing, Prospecting, and Visit/TOF campaigns. For Visit campaigns, engagement metrics (clicks, CTR, CPC) are the primary KPIs. For all other campaigns, leads and CPL are primary. Flag any CPL above $70.
+    "active_ads": """You are JARVIS, an expert paid media analyst AI for Schumacher Homes. You are embedded in their paid media dashboard and have direct access to live Meta Ads active ads data provided below.
 
-You can:
-- Generate top 5 / bottom 5 campaign and ad reports
-- Flag high CPL campaigns and ads
-- Analyze remarketing vs prospecting performance
-- Review Visit/TOF campaign click efficiency
-- Write Slack-ready health reports
+IMPORTANT: Live active ads tree data (campaigns → ad sets → ads) will be injected into this prompt. Always use those exact numbers — never say you don't have access to data.
 
-Ask clarifying questions when needed. Be specific and actionable.""",
+Campaign segments:
+- Remarketing (BOF/MOF): CPL target ~$50-70. Flag anything above $70.
+- Prospecting: Higher CPL expected (~$100-150).
+- Visit/TOF campaigns: Engagement-focused — judge by CTR and CPC only, NOT leads/CPL.
 
-    "trend_chart": """You are JARVIS, an AI assistant for a Meta Ads performance dashboard for Schumacher Homes. You are helping the user analyze performance trend data over time.
+You can: generate top/bottom performers, flag high CPL ads, analyze remarketing vs prospecting, review Visit/TOF click efficiency, write Slack-ready health reports. Be specific with campaign and ad names from the data.""",
 
-You can:
-- Summarize trend patterns and highlight significant changes
-- Identify anomalies, spikes, or drops and suggest causes
-- Compare performance across periods
-- Identify best and worst performing days/weeks
-- Write Slack-ready trend summaries
+    "trend_chart": """You are JARVIS, an expert paid media analyst AI for Schumacher Homes. You are embedded in their paid media dashboard and have direct access to live Meta Ads trend data provided below.
 
-Ask clarifying questions when needed. Focus on actionable insights.""",
+IMPORTANT: Live daily performance trend data will be injected into this prompt. Always use those exact numbers and dates — never say you don't have access to data.
 
-    "campaign_table": """You are JARVIS, an AI assistant for a Meta Ads performance dashboard for Schumacher Homes. You are helping the user analyze the campaign performance table.
+You can: summarize trend patterns, identify anomalies/spikes/drops, compare periods, identify best/worst days, write Slack-ready trend summaries. Always cite specific dates and figures from the data.""",
 
-The table contains campaign-level data including spend, leads, CPL, clicks, CTR, and CPC. Campaigns span remarketing, prospecting, and Visit/TOF types.
+    "campaign_table": """You are JARVIS, an expert paid media analyst AI for Schumacher Homes. You are embedded in their paid media dashboard and have direct access to live Meta Ads campaign data provided below.
 
-You can:
-- Rank campaigns by any metric
-- Identify top and bottom performers
-- Analyze spend allocation and efficiency
-- Flag underperforming campaigns
-- Write formatted Slack summaries
+IMPORTANT: Live campaign table data will be injected into this prompt. Always use those exact numbers — never say you don't have access to data.
 
-Ask clarifying questions when needed. Be specific and data-driven.""",
+Campaign data includes: spend, leads, CPL, clicks, CTR, CPC per campaign. Campaigns span remarketing, prospecting, and Visit/TOF types.
 
-    "alerts": """You are JARVIS, an AI assistant for a Meta Ads performance dashboard for Schumacher Homes. You are helping the user understand and respond to performance alerts.
+CPL benchmarks: Remarketing ~$50-70 (flag above $70), Prospecting ~$100-150. Visit/TOF: judge by CTR/CPC only.
 
-Alerts may include: budget pacing issues, CPL thresholds exceeded, frequency fatigue, ad rejection, or other anomalies.
+You can: rank campaigns by any metric, identify top/bottom performers, analyze spend allocation, flag underperformers, write Slack summaries. Always use actual campaign names and numbers from the data.""",
 
-You can:
-- Explain what each alert means and why it matters
-- Prioritize alerts by urgency
-- Recommend specific actions for each alert
-- Write Slack-ready alert summaries with action plans
+    "alerts": """You are JARVIS, an expert paid media analyst AI for Schumacher Homes. You are embedded in their paid media dashboard and have direct access to live alert data provided below.
 
-Be clear, direct, and actionable.""",
+IMPORTANT: Live alert data will be injected into this prompt. Always use those exact alert details — never say you don't have access to data.
+
+Alert types include: budget pacing issues, CPL threshold exceeded, frequency fatigue, ad rejection, spend anomalies.
+
+You can: explain each alert, prioritize by urgency, recommend specific actions, write Slack-ready alert summaries. Be direct and give specific next steps for each alert.""",
 }
+
+async def _fetch_section_data(section: str, start_date: Optional[str], end_date: Optional[str], settings) -> Optional[dict]:
+    """Auto-fetch live dashboard data for the given section so JARVIS always has real numbers."""
+    import json as _json
+    try:
+        from datetime import date
+        sd = start_date or date.today().replace(day=1).isoformat()
+        ed = end_date or date.today().isoformat()
+
+        if section in ("kpi_cards", "trend_chart"):
+            if settings.meta_access_token:
+                svc = LiveAPIService(meta_access_token=settings.meta_access_token)
+                acct = settings.meta_ad_account_id or "act_142003632"
+                result = await svc.get_meta_account_insights(acct, start_date=sd, end_date=ed)
+                return {"platform": "Meta Ads", "period": f"{sd} to {ed}", "metrics": result}
+
+        elif section == "active_ads":
+            if settings.meta_access_token:
+                svc = LiveAPIService(meta_access_token=settings.meta_access_token)
+                acct = settings.meta_ad_account_id or "act_142003632"
+                result = await svc.get_meta_active_ads_tree(acct, start_date=sd, end_date=ed)
+                return {"platform": "Meta Ads", "period": f"{sd} to {ed}", "active_ads_tree": result}
+
+        elif section == "campaign_table":
+            if settings.meta_access_token:
+                svc = LiveAPIService(meta_access_token=settings.meta_access_token)
+                acct = settings.meta_ad_account_id or "act_142003632"
+                result = await svc.get_meta_campaigns(acct, start_date=sd, end_date=ed)
+                return {"platform": "Meta Ads", "period": f"{sd} to {ed}", "campaigns": result}
+
+    except Exception as e:
+        logger.warning("jarvis_auto_fetch_failed: section=%s error=%s", section, str(e))
+    return None
+
 
 @router.post("/chat")
 async def jarvis_chat(request: JarvisChatRequest):
     """Multi-turn conversational chat with JARVIS, context-aware per section."""
     import anthropic as _anthropic
+    import json as _json
 
     settings = get_settings()
     anthropic_key = settings.anthropic_api_key if hasattr(settings, "anthropic_api_key") else os.environ.get("ANTHROPIC_API_KEY", "")
@@ -451,13 +471,16 @@ async def jarvis_chat(request: JarvisChatRequest):
 
     system_prompt = SECTION_SYSTEM_PROMPTS.get(request.section, SECTION_SYSTEM_PROMPTS["kpi_cards"])
 
-    # Append section data context to system prompt if available
-    if request.section_data:
-        import json as _json
-        system_prompt += f"\n\nCurrent section data (use this as context for your responses):\n{_json.dumps(request.section_data, indent=2)[:8000]}"
+    # Use provided section_data, or auto-fetch live data from the dashboard
+    section_data = request.section_data
+    if not section_data:
+        section_data = await _fetch_section_data(request.section, request.start_date, request.end_date, settings)
+
+    if section_data:
+        system_prompt += f"\n\n=== LIVE DASHBOARD DATA ===\nThe following is the actual current data from the dashboard. Use these exact numbers in your responses — do NOT say you lack access to data.\n\n{_json.dumps(section_data, indent=2)[:10000]}\n=== END DATA ==="
 
     if request.start_date and request.end_date:
-        system_prompt += f"\n\nDate range: {request.start_date} to {request.end_date}"
+        system_prompt += f"\n\nDate range being analyzed: {request.start_date} to {request.end_date}"
 
     try:
         client = _anthropic.Anthropic(api_key=anthropic_key)
