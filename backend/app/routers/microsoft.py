@@ -238,28 +238,76 @@ def _build_microsoft_active_ads_tree(
     """
     Build a campaign -> ad group tree from Microsoft Ads performance rows.
 
+    Both tools return per-day rows (one row per TimePeriod per entity), so we
+    must aggregate by CampaignId / AdGroupId before building the tree.
+
     campaign_rows: from microsoft_ads_campaign_performance
     ad_group_rows: from microsoft_ads_ad_group_performance
+      - status field is "Status" (not "AdGroupStatus")
     mode: "active" or "with_spend"
     """
-    # Index ad groups by CampaignId
-    groups_by_campaign: dict = {}
+    # ── Step 1: Aggregate campaign rows by CampaignId ──────────────────────────
+    campaign_agg: dict = {}
+    for row in campaign_rows:
+        cid = str(row.get("CampaignId", ""))
+        if not cid:
+            continue
+        if cid not in campaign_agg:
+            campaign_agg[cid] = {
+                "CampaignId": cid,
+                "CampaignName": row.get("CampaignName", ""),
+                "CampaignStatus": row.get("CampaignStatus", ""),
+                "Spend": 0.0,
+                "Clicks": 0,
+                "Impressions": 0,
+                "Conversions": 0,
+            }
+        campaign_agg[cid]["Spend"] += _parse_float(row.get("Spend", 0))
+        campaign_agg[cid]["Clicks"] += _parse_int(row.get("Clicks", 0))
+        campaign_agg[cid]["Impressions"] += _parse_int(row.get("Impressions", 0))
+        campaign_agg[cid]["Conversions"] += _parse_int(row.get("Conversions", 0))
+
+    # ── Step 2: Aggregate ad-group rows by (CampaignId, AdGroupId) ─────────────
+    # Status field from the tool is "Status", not "AdGroupStatus"
+    adgroup_agg: dict = {}
     for ag in ad_group_rows:
         cid = str(ag.get("CampaignId", ""))
-        if cid not in groups_by_campaign:
-            groups_by_campaign[cid] = []
-        groups_by_campaign[cid].append(ag)
+        agid = str(ag.get("AdGroupId", ""))
+        if not cid or not agid:
+            continue
+        key = (cid, agid)
+        if key not in adgroup_agg:
+            adgroup_agg[key] = {
+                "CampaignId": cid,
+                "AdGroupId": agid,
+                "AdGroupName": ag.get("AdGroupName", ""),
+                "Status": ag.get("Status", ""),
+                "Spend": 0.0,
+                "Clicks": 0,
+                "Impressions": 0,
+                "Conversions": 0,
+            }
+        adgroup_agg[key]["Spend"] += _parse_float(ag.get("Spend", 0))
+        adgroup_agg[key]["Clicks"] += _parse_int(ag.get("Clicks", 0))
+        adgroup_agg[key]["Impressions"] += _parse_int(ag.get("Impressions", 0))
+        adgroup_agg[key]["Conversions"] += _parse_int(ag.get("Conversions", 0))
 
+    # ── Step 3: Group aggregated ad groups by CampaignId ───────────────────────
+    groups_by_campaign: dict = {}
+    for (cid, _agid), ag in adgroup_agg.items():
+        groups_by_campaign.setdefault(cid, []).append(ag)
+
+    # ── Step 4: Build tree ──────────────────────────────────────────────────────
     campaigns_out = []
     total_leaf_items = 0
 
-    for row in campaign_rows:
-        c_spend = _parse_float(row.get("Spend", 0))
-        c_clicks = _parse_int(row.get("Clicks", 0))
-        c_impressions = _parse_int(row.get("Impressions", 0))
-        c_conversions = _parse_int(row.get("Conversions", 0))
-        c_status = row.get("CampaignStatus", "")
-        cid = str(row.get("CampaignId", ""))
+    for cid, row in campaign_agg.items():
+        c_spend = row["Spend"]
+        c_clicks = row["Clicks"]
+        c_impressions = row["Impressions"]
+        c_conversions = row["Conversions"]
+        c_status = row["CampaignStatus"]
+        c_name = row["CampaignName"]
 
         # mode=active: skip paused/removed campaigns
         if mode == "active" and c_status.lower() not in ("active", "enabled"):
@@ -268,17 +316,16 @@ def _build_microsoft_active_ads_tree(
         if mode == "with_spend" and c_spend <= 0:
             continue
 
-        c_name = row.get("CampaignName", "")
         is_pmax = "performance max" in c_name.lower()
 
         # Build ad groups for this campaign
         adsets = []
         for ag in groups_by_campaign.get(cid, []):
-            ag_spend = _parse_float(ag.get("Spend", 0))
-            ag_clicks = _parse_int(ag.get("Clicks", 0))
-            ag_impressions = _parse_int(ag.get("Impressions", 0))
-            ag_conversions = _parse_int(ag.get("Conversions", 0))
-            ag_status = ag.get("AdGroupStatus", "")
+            ag_spend = ag["Spend"]
+            ag_clicks = ag["Clicks"]
+            ag_impressions = ag["Impressions"]
+            ag_conversions = ag["Conversions"]
+            ag_status = ag["Status"]
 
             if mode == "active" and ag_status.lower() not in ("active", "enabled"):
                 continue
@@ -286,8 +333,8 @@ def _build_microsoft_active_ads_tree(
                 continue
 
             adsets.append({
-                "id": str(ag.get("AdGroupId", "")),
-                "name": ag.get("AdGroupName", ""),
+                "id": ag["AdGroupId"],
+                "name": ag["AdGroupName"],
                 "status": ag_status,
                 "ad_count": 0,
                 "spend": round(ag_spend, 2),
