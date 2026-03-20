@@ -164,6 +164,12 @@ export default function GoogleDashboardPage() {
     fetchData();
   }, [fetchData]);
 
+  // Auto-load active ads tree on mount
+  useEffect(() => {
+    handleActiveAdsTreeOpen(adsTreeStartDate, adsTreeEndDate, "active");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handlePresetChange = (preset: string) => {
     setSelectedPreset(preset);
     setCustomRange(null);

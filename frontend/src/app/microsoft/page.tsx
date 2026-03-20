@@ -103,6 +103,12 @@ export default function MicrosoftDashboardPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // Auto-load active ads tree on mount
+  useEffect(() => {
+    handleActiveAdsTreeOpen(adsTreeStartDate, adsTreeEndDate, "active");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const connected = !!data?.connected;
 
   const handleActiveAdsTreeOpen = async (startDate: string, endDate: string, mode: "active" | "with_spend" = "active") => {
