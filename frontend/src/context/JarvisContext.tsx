@@ -107,7 +107,7 @@ export function JarvisProvider({ children }: { children: React.ReactNode }) {
     setIsOpen(true);
   }, []);
 
-  const close = useCallback(() => setIsOpen(false), []);
+  const close = useCallback(() => { setIsOpen(false); setIsExpanded(false); }, []);
 
   const clearThread = useCallback((section: Section) => {
     setThreads(prev => ({ ...prev, [section]: [] }));
