@@ -230,6 +230,103 @@ async def get_ai_insights(body: dict):
         return {"success": False, "error": str(e)}
 
 
+def _md_to_slack(text: str) -> str:
+    """
+    Convert markdown to Slack mrkdwn format.
+    - **bold** → *bold*
+    - ## Header → *HEADER*
+    - ### Header → *Header*
+    - # Header → *HEADER*
+    - - item / * item → • item
+    - --- → blank line
+    - Strip code fences for special blocks; keep content readable
+    """
+    import re
+    lines = text.split("\n")
+    out: list[str] = []
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Skip special code block fences — keep their inner text as-is
+        if stripped.startswith("```"):
+            block_lines: list[str] = []
+            j = i + 1
+            while j < len(lines) and not lines[j].strip().startswith("```"):
+                block_lines.append(lines[j])
+                j += 1
+            # Include inner content as plain text (skip JSON blocks which are data)
+            block_type = stripped.replace("```", "").strip().lower()
+            if block_type not in ("pause_list", "budget_table", "email_report"):
+                out.extend(block_lines)
+            i = j + 1
+            continue
+
+        # Headers
+        if stripped.startswith("### "):
+            heading = stripped[4:].replace("**", "")
+            out.append(f"*{heading}*")
+            i += 1
+            continue
+        if stripped.startswith("## "):
+            heading = stripped[3:].replace("**", "").upper()
+            out.append(f"*{heading}*")
+            i += 1
+            continue
+        if stripped.startswith("# "):
+            heading = stripped[2:].replace("**", "").upper()
+            out.append(f"*{heading}*")
+            i += 1
+            continue
+
+        # Horizontal rules → blank line
+        if re.match(r"^[-*_]{3,}$", stripped):
+            out.append("")
+            i += 1
+            continue
+
+        # List items
+        ul_match = re.match(r"^[-*•]\s+(.+)", stripped)
+        if ul_match:
+            item = _inline_md_to_slack(ul_match.group(1))
+            out.append(f"• {item}")
+            i += 1
+            continue
+
+        ol_match = re.match(r"^(\d+)\.\s+(.+)", stripped)
+        if ol_match:
+            item = _inline_md_to_slack(ol_match.group(2))
+            out.append(f"{ol_match.group(1)}. {item}")
+            i += 1
+            continue
+
+        # Regular line
+        if stripped:
+            out.append(_inline_md_to_slack(stripped))
+        else:
+            out.append("")
+        i += 1
+
+    # Collapse 3+ blank lines to 2
+    result = "\n".join(out)
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip()
+
+
+def _inline_md_to_slack(text: str) -> str:
+    """Convert inline markdown to Slack mrkdwn."""
+    import re
+    # **bold** → *bold*  (do bold first before italic to avoid double-processing)
+    text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)
+    # _italic_ → _italic_  (already Slack format, leave as-is)
+    # `code` → `code` (already fine in Slack)
+    # Strip links — keep display text
+    text = re.sub(r"\[(.+?)\]\(.+?\)", r"\1", text)
+    return text
+
+
 @router.post("/send-report")
 async def send_report(body: dict):
     """
@@ -249,10 +346,11 @@ async def send_report(body: dict):
         try:
             from slack_sdk.web.async_client import AsyncWebClient
             clean_channel = channel.lstrip("#")
+            slack_text = _md_to_slack(message)
             slack_client = AsyncWebClient(token=settings.slack_bot_token)
             await slack_client.chat_postMessage(
                 channel=f"#{clean_channel}",
-                text=f"*JARVIS Report*\n\n{message}",
+                text=f"*📊 JARVIS Report*\n\n{slack_text}",
             )
             return {"success": True, "message": f"Report sent to #{clean_channel}", "channel": clean_channel}
         except Exception as e:

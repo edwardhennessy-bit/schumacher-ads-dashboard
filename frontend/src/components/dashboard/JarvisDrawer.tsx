@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useJarvis, Section } from "@/context/JarvisContext";
 import { api } from "@/lib/api";
+import { formatMessage } from "@/components/chat/JarvisMessageRenderer";
 
 // ── Section config ────────────────────────────────────────────────────────────
 
@@ -230,12 +231,12 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
                 <Bot className="h-3 w-3 text-white" />
               </div>
             )}
-            <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words ${
+            <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed break-words ${
               msg.role === "user"
                 ? "bg-[#f27038] text-white rounded-tr-sm"
                 : "bg-white border border-gray-200 text-gray-800 shadow-sm rounded-tl-sm"
             }`}>
-              {msg.content}
+              {msg.role === "user" ? msg.content : formatMessage(msg.content)}
             </div>
           </div>
         ))}
