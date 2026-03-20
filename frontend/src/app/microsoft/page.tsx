@@ -3,6 +3,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { Header } from "@/components/layout/Header";
 import { MetricCard } from "@/components/dashboard/MetricCard";
+import { ActiveAdsTree } from "@/components/dashboard/ActiveAdsTree";
+import { JarvisProvider } from "@/context/JarvisContext";
+import {
+  JarvisDrawer,
+  AskJarvisButton,
+} from "@/components/dashboard/JarvisDrawer";
 import {
   Monitor,
   DollarSign,
@@ -12,6 +18,7 @@ import {
   Target,
 } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/mock-data";
+import { api, ActiveAdsTree as ActiveAdsTreeData } from "@/lib/api";
 import { DateRange, DEFAULT_PRESET, getPresetByValue } from "@/lib/date-range";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
@@ -60,6 +67,15 @@ export default function MicrosoftDashboardPage() {
   const [selectedPreset, setSelectedPreset] = useState(DEFAULT_PRESET);
   const [customRange, setCustomRange] = useState<DateRange | null>(null);
 
+  // Active Ads Tree state
+  const [adsTreeData, setAdsTreeData] = useState<ActiveAdsTreeData | null>(null);
+  const [adsTreeLoading, setAdsTreeLoading] = useState(false);
+  const [adsTreeStartDate, setAdsTreeStartDate] = useState<string>(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  });
+  const [adsTreeEndDate, setAdsTreeEndDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+
   const getActiveDateRange = useCallback((): DateRange => {
     if (customRange) return customRange;
     const preset = getPresetByValue(selectedPreset);
@@ -89,7 +105,22 @@ export default function MicrosoftDashboardPage() {
 
   const connected = !!data?.connected;
 
+  const handleActiveAdsTreeOpen = async (startDate: string, endDate: string, mode: "active" | "with_spend" = "active") => {
+    setAdsTreeLoading(true);
+    setAdsTreeStartDate(startDate);
+    setAdsTreeEndDate(endDate);
+    try {
+      const result = await api.getMicrosoftActiveAdsTree(startDate, endDate, mode);
+      setAdsTreeData(result);
+    } catch (err) {
+      console.error("Microsoft active ads tree error:", err);
+    } finally {
+      setAdsTreeLoading(false);
+    }
+  };
+
   return (
+    <JarvisProvider>
     <div className="min-h-screen bg-background">
       <Header
         title="Microsoft Ads"
@@ -124,6 +155,11 @@ export default function MicrosoftDashboardPage() {
         {connected && data ? (
           <>
             {/* Primary KPIs */}
+            <div id="kpi_cards">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-semibold text-gray-700">Key Metrics</h2>
+              <AskJarvisButton section="kpi_cards" />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <MetricCard
                 title="Spend"
@@ -188,10 +224,34 @@ export default function MicrosoftDashboardPage() {
                 className="border-l-4 border-l-cyan-500"
               />
             </div>
+            </div>{/* end kpi_cards */}
+
+            {/* Active Ads Section */}
+            <div id="active_ads">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-sm font-semibold text-gray-700">Microsoft Active Ads</h2>
+                <AskJarvisButton section="active_ads" />
+              </div>
+              <ActiveAdsTree
+                platform="microsoft"
+                totalActiveAds={adsTreeData?.total_active_ads ?? 0}
+                threshold={200}
+                campaigns={adsTreeData?.campaigns ?? []}
+                isLoading={adsTreeLoading}
+                onOpen={handleActiveAdsTreeOpen}
+                startDate={adsTreeStartDate}
+                endDate={adsTreeEndDate}
+                onDateChange={(s, e) => { setAdsTreeStartDate(s); setAdsTreeEndDate(e); }}
+              />
+            </div>
 
             {/* Campaign breakdown */}
             {data.campaigns && data.campaigns.length > 0 && (
-              <div>
+              <div id="campaign_table">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-sm font-semibold text-gray-700">Campaign Breakdown</h2>
+                  <AskJarvisButton section="campaign_table" />
+                </div>
                 <h3 className="text-sm font-semibold mb-3 text-gray-700">
                   Campaign Breakdown ({data.campaigns.length} campaigns)
                 </h3>
@@ -253,5 +313,7 @@ export default function MicrosoftDashboardPage() {
         )}
       </div>
     </div>
+    <JarvisDrawer />
+    </JarvisProvider>
   );
 }

@@ -5,6 +5,12 @@ import { Header } from "@/components/layout/Header";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { TrendChart } from "@/components/dashboard/TrendChart";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
+import { ActiveAdsTree } from "@/components/dashboard/ActiveAdsTree";
+import { JarvisProvider } from "@/context/JarvisContext";
+import {
+  JarvisDrawer,
+  AskJarvisButton,
+} from "@/components/dashboard/JarvisDrawer";
 import {
   DollarSign,
   MousePointer,
@@ -20,7 +26,7 @@ import {
   formatNumber,
   formatPercent,
 } from "@/lib/mock-data";
-import { api, MetricsOverview, DailyMetric, Campaign } from "@/lib/api";
+import { api, MetricsOverview, DailyMetric, Campaign, ActiveAdsTree as ActiveAdsTreeData } from "@/lib/api";
 import {
   DateRange,
   DEFAULT_PRESET,
@@ -117,6 +123,15 @@ export default function GoogleDashboardPage() {
   const [selectedPreset, setSelectedPreset] = useState(DEFAULT_PRESET);
   const [customRange, setCustomRange] = useState<DateRange | null>(null);
 
+  // Active Ads Tree state
+  const [adsTreeData, setAdsTreeData] = useState<ActiveAdsTreeData | null>(null);
+  const [adsTreeLoading, setAdsTreeLoading] = useState(false);
+  const [adsTreeStartDate, setAdsTreeStartDate] = useState<string>(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  });
+  const [adsTreeEndDate, setAdsTreeEndDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+
   const getActiveDateRange = useCallback((): DateRange => {
     if (customRange) return customRange;
     const preset = getPresetByValue(selectedPreset);
@@ -158,9 +173,24 @@ export default function GoogleDashboardPage() {
     setCustomRange(range);
   };
 
+  const handleActiveAdsTreeOpen = async (startDate: string, endDate: string, mode: "active" | "with_spend" = "active") => {
+    setAdsTreeLoading(true);
+    setAdsTreeStartDate(startDate);
+    setAdsTreeEndDate(endDate);
+    try {
+      const result = await api.getGoogleActiveAdsTree(startDate, endDate, mode);
+      setAdsTreeData(result);
+    } catch (err) {
+      console.error("Google active ads tree error:", err);
+    } finally {
+      setAdsTreeLoading(false);
+    }
+  };
+
   const chartTitle = `${formatDateRangeLabel(selectedPreset, customRange)} Performance Trends`;
 
   return (
+    <JarvisProvider>
     <div className="min-h-screen bg-background">
       <Header
         title="Google Ads"
@@ -187,6 +217,13 @@ export default function GoogleDashboardPage() {
             </p>
           </div>
         )}
+
+        {/* KPI Cards Section */}
+        <div id="kpi_cards">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-semibold text-gray-700">Key Metrics</h2>
+          <AskJarvisButton section="kpi_cards" />
+        </div>
 
         {/* Lead & Opportunity Metrics Row */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -257,17 +294,51 @@ export default function GoogleDashboardPage() {
             icon={<Target className="h-4 w-4" />}
           />
         </div>
+        </div>{/* end kpi_cards */}
+
+        {/* Active Ads Section */}
+        <div id="active_ads">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-semibold text-gray-700">Google Active Ads</h2>
+            <AskJarvisButton section="active_ads" />
+          </div>
+          <ActiveAdsTree
+            platform="google"
+            totalActiveAds={adsTreeData?.total_active_ads ?? 0}
+            threshold={200}
+            campaigns={adsTreeData?.campaigns ?? []}
+            isLoading={adsTreeLoading}
+            onOpen={handleActiveAdsTreeOpen}
+            startDate={adsTreeStartDate}
+            endDate={adsTreeEndDate}
+            onDateChange={(s, e) => { setAdsTreeStartDate(s); setAdsTreeEndDate(e); }}
+          />
+        </div>
 
         {/* Trend Chart */}
         {trends.length > 0 && (
-          <TrendChart data={trends} title={chartTitle} />
+          <div id="trend_chart">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-semibold text-gray-700">Performance Trends</h2>
+              <AskJarvisButton section="trend_chart" />
+            </div>
+            <TrendChart data={trends} title={chartTitle} />
+          </div>
         )}
 
         {/* Campaign Table */}
         {campaigns.length > 0 && (
-          <CampaignTable campaigns={campaigns} />
+          <div id="campaign_table">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-semibold text-gray-700">Campaigns</h2>
+              <AskJarvisButton section="campaign_table" />
+            </div>
+            <CampaignTable campaigns={campaigns} />
+          </div>
         )}
       </div>
     </div>
+    <JarvisDrawer />
+    </JarvisProvider>
   );
 }

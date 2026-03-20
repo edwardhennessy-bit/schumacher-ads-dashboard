@@ -8,6 +8,7 @@ import {
   Megaphone,
   Layout,
   Image,
+  FileText,
   Loader2,
 } from "lucide-react";
 import { ActiveCampaign, ActiveAdSet, ActiveAd } from "@/lib/api";
@@ -23,6 +24,7 @@ interface ActiveAdsTreeProps {
   startDate: string;
   endDate: string;
   onDateChange: (startDate: string, endDate: string) => void;
+  platform?: "meta" | "google" | "microsoft";
 }
 
 // --- Date preset helpers ---
@@ -193,11 +195,12 @@ function KpiBar({ spend, clicks, ctr, cpc, leads, cost_per_lead, size = "sm" }: 
   );
 }
 
-function AdRow({ ad }: { ad: ActiveAd }) {
+function AdRow({ ad, platform }: { ad: ActiveAd; platform?: "meta" | "google" | "microsoft" }) {
+  const AdIcon = platform === "meta" ? Image : FileText;
   return (
     <div className="py-1.5 px-2 text-xs text-gray-600">
       <div className="flex items-center gap-2">
-        <Image className="h-3 w-3 text-gray-300 shrink-0" />
+        <AdIcon className="h-3 w-3 text-gray-300 shrink-0" />
         <span className="truncate font-medium">{ad.name}</span>
       </div>
       <div className="ml-5">
@@ -215,7 +218,7 @@ function AdRow({ ad }: { ad: ActiveAd }) {
   );
 }
 
-function AdSetRow({ adset }: { adset: ActiveAdSet }) {
+function AdSetRow({ adset, platform }: { adset: ActiveAdSet; platform?: "meta" | "google" | "microsoft" }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
@@ -251,7 +254,7 @@ function AdSetRow({ adset }: { adset: ActiveAdSet }) {
           {adset.ads.length === 0 ? (
             <p className="text-xs text-gray-400 py-1 px-2">No ads</p>
           ) : (
-            adset.ads.map((ad) => <AdRow key={ad.id} ad={ad} />)
+            adset.ads.map((ad) => <AdRow key={ad.id} ad={ad} platform={platform} />)
           )}
         </div>
       )}
@@ -259,8 +262,12 @@ function AdSetRow({ adset }: { adset: ActiveAdSet }) {
   );
 }
 
-function CampaignRow({ campaign }: { campaign: ActiveCampaign }) {
+function CampaignRow({ campaign, groupLabel, platform }: { campaign: ActiveCampaign; groupLabel: string; platform?: "meta" | "google" | "microsoft" }) {
   const [open, setOpen] = useState(false);
+  const isPmax = campaign.is_pmax === true;
+  const groupLabelSingular = groupLabel.endsWith("s") ? groupLabel.slice(0, -1) : groupLabel;
+  const effectiveGroupLabel = isPmax ? "Asset Groups" : groupLabel;
+  const effectiveGroupLabelSingular = isPmax ? "Asset Group" : groupLabelSingular;
   return (
     <div className="border border-gray-100 rounded-lg overflow-hidden">
       <button
@@ -278,8 +285,10 @@ function CampaignRow({ campaign }: { campaign: ActiveCampaign }) {
             {campaign.name}
           </span>
           <div className="flex items-center gap-3 shrink-0 ml-2 text-xs text-gray-400">
-            <span>{campaign.adset_count} ad {campaign.adset_count === 1 ? "set" : "sets"}</span>
-            <span className="font-medium text-gray-600">{campaign.ad_count} {campaign.ad_count === 1 ? "ad" : "ads"}</span>
+            <span>{campaign.adset_count} {campaign.adset_count === 1 ? effectiveGroupLabelSingular : effectiveGroupLabel}</span>
+            {!isPmax && (
+              <span className="font-medium text-gray-600">{campaign.ad_count} {campaign.ad_count === 1 ? "ad" : "ads"}</span>
+            )}
           </div>
         </div>
         <div className="ml-6">
@@ -296,10 +305,10 @@ function CampaignRow({ campaign }: { campaign: ActiveCampaign }) {
       {open && (
         <div className="px-2 py-1">
           {campaign.adsets.length === 0 ? (
-            <p className="text-xs text-gray-400 py-2 px-3">No ad sets</p>
+            <p className="text-xs text-gray-400 py-2 px-3">No {effectiveGroupLabel.toLowerCase()}</p>
           ) : (
             campaign.adsets.map((adset) => (
-              <AdSetRow key={adset.id} adset={adset} />
+              <AdSetRow key={adset.id} adset={adset} platform={platform} />
             ))
           )}
         </div>
@@ -317,7 +326,9 @@ export function ActiveAdsTree({
   startDate,
   endDate,
   onDateChange,
+  platform = "meta",
 }: ActiveAdsTreeProps) {
+  const groupLabel = platform === "meta" ? "Ad Sets" : "Ad Groups";
   const [open, setOpen] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState("mtd");
   const [adsMode, setAdsMode] = useState<"active" | "with_spend">("active");
@@ -509,7 +520,7 @@ export function ActiveAdsTree({
                   }
                 </p>
                 {campaigns.map((campaign) => (
-                  <CampaignRow key={campaign.id} campaign={campaign} />
+                  <CampaignRow key={campaign.id} campaign={campaign} groupLabel={groupLabel} platform={platform} />
                 ))}
               </div>
             )}

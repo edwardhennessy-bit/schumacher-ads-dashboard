@@ -177,6 +177,30 @@ async def get_google_trends(
         return []
 
 
+@router.get("/active-ads-tree")
+async def get_google_active_ads_tree(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    mode: str = Query("active"),
+):
+    """Get Google Ads campaign → ad group → ad hierarchy with performance metrics."""
+    if not start_date or not end_date:
+        return {"success": False, "total_active_ads": 0, "campaigns": [], "error": "Date range required"}
+
+    settings = get_settings()
+    customer_id = settings.google_ads_customer_id or SCHUMACHER_GOOGLE_CUSTOMER_ID
+    service = _get_google_service()
+
+    if not service.is_configured:
+        return {"success": False, "total_active_ads": 0, "campaigns": [], "error": "Google Ads not configured"}
+
+    try:
+        return await service.get_active_ads_tree(customer_id, start_date, end_date, mode)
+    except Exception as e:
+        logger.error("google_active_ads_tree_error", error=str(e))
+        return {"success": False, "total_active_ads": 0, "campaigns": [], "error": str(e)}
+
+
 @router.get("/status")
 async def get_google_status():
     """Check if Google Ads is configured and connected."""

@@ -110,6 +110,7 @@ export interface ActiveCampaign {
   adset_count: number;
   ad_count: number;
   adsets: ActiveAdSet[];
+  is_pmax?: boolean;
   spend?: number;
   impressions?: number;
   clicks?: number;
@@ -374,6 +375,22 @@ class ApiClient {
 
   async getGoogleStatus(): Promise<{ configured: boolean; customer_id: string }> {
     return this.fetch("/api/google/status");
+  }
+
+  async getGoogleActiveAdsTree(startDate?: string, endDate?: string, mode: "active" | "with_spend" = "active"): Promise<ActiveAdsTree> {
+    const params = new URLSearchParams();
+    if (startDate) params.set("start_date", startDate);
+    if (endDate) params.set("end_date", endDate);
+    params.set("mode", mode);
+    return this.fetch<ActiveAdsTree>(`/api/google/active-ads-tree?${params.toString()}`);
+  }
+
+  async getMicrosoftActiveAdsTree(startDate?: string, endDate?: string, mode: "active" | "with_spend" = "active"): Promise<ActiveAdsTree> {
+    const params = new URLSearchParams();
+    if (startDate) params.set("start_date", startDate);
+    if (endDate) params.set("end_date", endDate);
+    params.set("mode", mode);
+    return this.fetch<ActiveAdsTree>(`/api/microsoft/active-ads-tree?${params.toString()}`);
   }
 
   // --- Reporting ---

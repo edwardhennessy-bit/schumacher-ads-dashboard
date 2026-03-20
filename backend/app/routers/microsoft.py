@@ -230,6 +230,153 @@ async def get_microsoft_campaigns(
         return []
 
 
+def _build_microsoft_active_ads_tree(
+    campaign_rows: list,
+    ad_group_rows: list,
+    mode: str,
+) -> dict:
+    """
+    Build a campaign -> ad group tree from Microsoft Ads performance rows.
+
+    campaign_rows: from microsoft_ads_campaign_performance
+    ad_group_rows: from microsoft_ads_ad_group_performance
+    mode: "active" or "with_spend"
+    """
+    # Index ad groups by CampaignId
+    groups_by_campaign: dict = {}
+    for ag in ad_group_rows:
+        cid = str(ag.get("CampaignId", ""))
+        if cid not in groups_by_campaign:
+            groups_by_campaign[cid] = []
+        groups_by_campaign[cid].append(ag)
+
+    campaigns_out = []
+    total_leaf_items = 0
+
+    for row in campaign_rows:
+        c_spend = _parse_float(row.get("Spend", 0))
+        c_clicks = _parse_int(row.get("Clicks", 0))
+        c_impressions = _parse_int(row.get("Impressions", 0))
+        c_conversions = _parse_int(row.get("Conversions", 0))
+        c_status = row.get("CampaignStatus", "")
+        cid = str(row.get("CampaignId", ""))
+
+        # mode=active: skip paused/removed campaigns
+        if mode == "active" and c_status.lower() not in ("active", "enabled"):
+            continue
+        # mode=with_spend: skip zero-spend campaigns
+        if mode == "with_spend" and c_spend <= 0:
+            continue
+
+        c_name = row.get("CampaignName", "")
+        is_pmax = "performance max" in c_name.lower()
+
+        # Build ad groups for this campaign
+        adsets = []
+        for ag in groups_by_campaign.get(cid, []):
+            ag_spend = _parse_float(ag.get("Spend", 0))
+            ag_clicks = _parse_int(ag.get("Clicks", 0))
+            ag_impressions = _parse_int(ag.get("Impressions", 0))
+            ag_conversions = _parse_int(ag.get("Conversions", 0))
+            ag_status = ag.get("AdGroupStatus", "")
+
+            if mode == "active" and ag_status.lower() not in ("active", "enabled"):
+                continue
+            if mode == "with_spend" and ag_spend <= 0:
+                continue
+
+            adsets.append({
+                "id": str(ag.get("AdGroupId", "")),
+                "name": ag.get("AdGroupName", ""),
+                "status": ag_status,
+                "ad_count": 0,
+                "spend": round(ag_spend, 2),
+                "impressions": ag_impressions,
+                "clicks": ag_clicks,
+                "ctr": round(ag_clicks / ag_impressions * 100, 2) if ag_impressions else 0,
+                "cpc": round(ag_spend / ag_clicks, 2) if ag_clicks else 0,
+                "leads": ag_conversions,
+                "cost_per_lead": round(ag_spend / ag_conversions, 2) if ag_conversions else 0,
+                "ads": [],
+            })
+
+        adsets.sort(key=lambda x: x["spend"], reverse=True)
+        adset_count = len(adsets)
+        total_leaf_items += adset_count
+
+        leads = c_conversions
+        cpl = round(c_spend / leads, 2) if leads else 0
+
+        campaigns_out.append({
+            "id": cid,
+            "name": c_name,
+            "status": c_status,
+            "is_pmax": is_pmax,
+            "adset_count": adset_count,
+            "ad_count": 0,
+            "spend": round(c_spend, 2),
+            "impressions": c_impressions,
+            "clicks": c_clicks,
+            "ctr": round(c_clicks / c_impressions * 100, 2) if c_impressions else 0,
+            "cpc": round(c_spend / c_clicks, 2) if c_clicks else 0,
+            "leads": leads,
+            "cost_per_lead": cpl,
+            "adsets": adsets,
+        })
+
+    campaigns_out.sort(key=lambda x: x["spend"], reverse=True)
+    return {
+        "success": True,
+        "total_active_ads": total_leaf_items,
+        "mode": mode,
+        "campaigns": campaigns_out,
+    }
+
+
+@router.get("/active-ads-tree")
+async def get_microsoft_active_ads_tree(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    mode: str = Query("active"),
+):
+    """Get Microsoft Ads campaign → ad group hierarchy with performance metrics."""
+    if not start_date or not end_date:
+        return {"success": False, "total_active_ads": 0, "campaigns": [], "error": "Date range required"}
+
+    settings = get_settings()
+    mcp = get_mcp_client(
+        gateway_url=settings.gateway_url,
+        gateway_token=settings.gateway_token,
+    )
+
+    if not mcp.is_configured:
+        return {"success": False, "total_active_ads": 0, "campaigns": [], "error": "Microsoft Ads gateway not configured"}
+
+    account_id = SCHUMACHER_MICROSOFT_ACCOUNT_ID
+
+    try:
+        campaign_raw, ad_group_raw = await asyncio.gather(
+            mcp.call_tool("microsoft_ads_campaign_performance", {
+                "accountId": account_id,
+                "startDate": start_date,
+                "endDate": end_date,
+            }),
+            mcp.call_tool("microsoft_ads_ad_group_performance", {
+                "accountId": account_id,
+                "startDate": start_date,
+                "endDate": end_date,
+            }),
+        )
+    except Exception as e:
+        logger.error("microsoft_active_ads_tree_error", error=str(e))
+        return {"success": False, "total_active_ads": 0, "campaigns": [], "error": str(e)}
+
+    campaign_rows = campaign_raw if isinstance(campaign_raw, list) else campaign_raw.get("data", [])
+    ad_group_rows = ad_group_raw if isinstance(ad_group_raw, list) else ad_group_raw.get("data", [])
+
+    return _build_microsoft_active_ads_tree(campaign_rows, ad_group_rows, mode)
+
+
 @router.get("/status")
 async def get_microsoft_status():
     """Check if Microsoft Ads gateway is configured."""

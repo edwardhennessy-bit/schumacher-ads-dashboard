@@ -112,6 +112,293 @@ class GoogleAdsService:
             return await self._daily_perf_direct(customer_id, date_range)
         return {"success": False, "error": "No data source configured", "data": []}
 
+    async def get_active_ads_tree(
+        self,
+        customer_id: str,
+        start_date: str,
+        end_date: str,
+        mode: str = "active",
+    ) -> Dict[str, Any]:
+        """
+        Fetch campaign -> ad group -> ad hierarchy with performance metrics.
+
+        mode="active"     : only ENABLED campaigns/ad groups/ads
+        mode="with_spend" : any item with spend > 0
+        """
+        # --- Build GAQL queries ---
+        active_filter_ad = (
+            " AND campaign.status = 'ENABLED'"
+            " AND ad_group.status = 'ENABLED'"
+            " AND ad_group_ad.status = 'ENABLED'"
+        ) if mode == "active" else ""
+
+        active_filter_pmax = (
+            " AND campaign.status = 'ENABLED'"
+            " AND asset_group.status = 'ENABLED'"
+        ) if mode == "active" else ""
+
+        query_a = (
+            f"SELECT campaign.id, campaign.name, campaign.status,"
+            f" campaign.advertising_channel_type,"
+            f" ad_group.id, ad_group.name, ad_group.status,"
+            f" ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status,"
+            f" metrics.cost_micros, metrics.impressions, metrics.clicks"
+            f" FROM ad_group_ad"
+            f" WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'"
+            f" AND campaign.advertising_channel_type != 'PERFORMANCE_MAX'"
+            f"{active_filter_ad}"
+            f" ORDER BY metrics.cost_micros DESC"
+        )
+
+        query_b = (
+            f"SELECT campaign.id, campaign.name, campaign.status,"
+            f" asset_group.id, asset_group.name, asset_group.status,"
+            f" metrics.cost_micros, metrics.impressions, metrics.clicks"
+            f" FROM asset_group"
+            f" WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'"
+            f"{active_filter_pmax}"
+            f" ORDER BY metrics.cost_micros DESC"
+        )
+
+        query_c = (
+            f"SELECT campaign.id, segments.conversion_action_name, metrics.all_conversions"
+            f" FROM campaign"
+            f" WHERE segments.date BETWEEN '{start_date}' AND '{end_date}'"
+            f" AND campaign.status != 'REMOVED'"
+            f" AND segments.conversion_action_name IN"
+            f" ('{MQL_CONVERSION_ACTION}', '{OPPORTUNITY_CONVERSION_ACTION}')"
+        )
+
+        # --- Execute queries ---
+        if self.has_gateway:
+            async def _call(q: str):
+                return await self.mcp_client.call_tool(
+                    "googleads_query", {"customerId": customer_id, "query": q}
+                )
+            raw_a, raw_c = await asyncio.gather(_call(query_a), _call(query_c))
+            try:
+                raw_b = await _call(query_b)
+            except Exception as exc:
+                logger.warning("google_pmax_asset_group_query_failed", error=str(exc))
+                raw_b = []
+        elif self.has_direct_api:
+            res_a, res_c = await asyncio.gather(
+                self._execute_gaql(customer_id, query_a),
+                self._execute_gaql(customer_id, query_c),
+            )
+            raw_a = res_a.get("data", []) if res_a.get("success") else []
+            raw_c = res_c.get("data", []) if res_c.get("success") else []
+            try:
+                res_b = await self._execute_gaql(customer_id, query_b)
+                raw_b = res_b.get("data", []) if res_b.get("success") else []
+            except Exception:
+                raw_b = []
+        else:
+            return {"success": False, "total_active_ads": 0, "campaigns": [], "mode": mode,
+                    "error": "No data source configured"}
+
+        # --- Parse lead conversions by campaign ---
+        leads_by_campaign: Dict[str, float] = {}
+        for row in _normalize_rows(raw_c):
+            c = row.get("campaign", {})
+            seg = row.get("segments", {})
+            m = row.get("metrics", {})
+            cid = str(c.get("id", ""))
+            action = seg.get("conversion_action_name", seg.get("conversionActionName", ""))
+            convs = m.get("all_conversions", m.get("allConversions", 0))
+            if isinstance(convs, str):
+                convs = float(convs)
+            if action in (MQL_CONVERSION_ACTION, OPPORTUNITY_CONVERSION_ACTION):
+                leads_by_campaign[cid] = leads_by_campaign.get(cid, 0) + convs
+
+        # --- Build standard campaign tree from Query A ---
+        # Structure: {campaign_id: {meta, adgroups: {adgroup_id: {meta, ads: []}}}}
+        campaign_map: Dict[str, Any] = {}
+
+        for row in _normalize_rows(raw_a):
+            c = row.get("campaign", {})
+            ag = row.get("ad_group", {}) or row.get("adGroup", {})
+            aga = row.get("ad_group_ad", {}) or row.get("adGroupAd", {})
+            ad = aga.get("ad", {})
+            m = row.get("metrics", {})
+
+            cid = str(c.get("id", ""))
+            cost_micros = m.get("cost_micros", m.get("costMicros", 0))
+            spend = cost_micros / 1_000_000
+            impressions = int(m.get("impressions", 0))
+            clicks = int(m.get("clicks", 0))
+
+            # mode=with_spend: skip items with zero spend
+            if mode == "with_spend" and spend <= 0:
+                continue
+
+            status_raw = c.get("status", "")
+            c_status = "ACTIVE" if status_raw in ("ENABLED", 2) else "PAUSED"
+
+            if cid not in campaign_map:
+                campaign_map[cid] = {
+                    "id": cid,
+                    "name": c.get("name", ""),
+                    "status": c_status,
+                    "is_pmax": False,
+                    "adgroups": {},
+                    "spend": 0.0, "impressions": 0, "clicks": 0,
+                }
+            cm = campaign_map[cid]
+
+            agid = str(ag.get("id", ""))
+            ag_status_raw = ag.get("status", "")
+            ag_status = "ACTIVE" if ag_status_raw in ("ENABLED", 2) else "PAUSED"
+
+            if agid not in cm["adgroups"]:
+                cm["adgroups"][agid] = {
+                    "id": agid,
+                    "name": ag.get("name", ""),
+                    "status": ag_status,
+                    "ads": [],
+                    "spend": 0.0, "impressions": 0, "clicks": 0,
+                }
+            agm = cm["adgroups"][agid]
+
+            ad_status_raw = aga.get("status", "")
+            ad_status = "ACTIVE" if ad_status_raw in ("ENABLED", 2) else "PAUSED"
+            ad_id = str(ad.get("id", ""))
+            ad_name = ad.get("name", "") or ad_id
+
+            agm["ads"].append({
+                "id": ad_id,
+                "name": ad_name,
+                "status": ad_status,
+                "spend": round(spend, 2),
+                "impressions": impressions,
+                "clicks": clicks,
+                "ctr": round(clicks / impressions * 100, 2) if impressions else 0,
+                "cpc": round(spend / clicks, 2) if clicks else 0,
+            })
+
+            agm["spend"] += spend
+            agm["impressions"] += impressions
+            agm["clicks"] += clicks
+            cm["spend"] += spend
+            cm["impressions"] += impressions
+            cm["clicks"] += clicks
+
+        # --- Build PMax tree from Query B ---
+        pmax_map: Dict[str, Any] = {}
+
+        for row in _normalize_rows(raw_b):
+            c = row.get("campaign", {})
+            ag = row.get("asset_group", {}) or row.get("assetGroup", {})
+            m = row.get("metrics", {})
+
+            cid = str(c.get("id", ""))
+            cost_micros = m.get("cost_micros", m.get("costMicros", 0))
+            spend = cost_micros / 1_000_000
+            impressions = int(m.get("impressions", 0))
+            clicks = int(m.get("clicks", 0))
+
+            if mode == "with_spend" and spend <= 0:
+                continue
+
+            status_raw = c.get("status", "")
+            c_status = "ACTIVE" if status_raw in ("ENABLED", 2) else "PAUSED"
+
+            if cid not in pmax_map:
+                pmax_map[cid] = {
+                    "id": cid,
+                    "name": c.get("name", ""),
+                    "status": c_status,
+                    "is_pmax": True,
+                    "adgroups": {},
+                    "spend": 0.0, "impressions": 0, "clicks": 0,
+                }
+            cm = pmax_map[cid]
+
+            agid = str(ag.get("id", ""))
+            ag_status_raw = ag.get("status", "")
+            ag_status = "ACTIVE" if ag_status_raw in ("ENABLED", 2) else "PAUSED"
+
+            if agid not in cm["adgroups"]:
+                cm["adgroups"][agid] = {
+                    "id": agid,
+                    "name": ag.get("name", ""),
+                    "status": ag_status,
+                    "ads": [],
+                    "spend": 0.0, "impressions": 0, "clicks": 0,
+                }
+            agm = cm["adgroups"][agid]
+            agm["spend"] += spend
+            agm["impressions"] += impressions
+            agm["clicks"] += clicks
+            cm["spend"] += spend
+            cm["impressions"] += impressions
+            cm["clicks"] += clicks
+
+        # --- Assemble final output ---
+        def _build_adsets(adgroups_map: Dict) -> List[Dict]:
+            adsets = []
+            for ag in adgroups_map.values():
+                sp = round(ag["spend"], 2)
+                cl = ag["clicks"]
+                im = ag["impressions"]
+                ad_count = len(ag["ads"])
+                adsets.append({
+                    "id": ag["id"],
+                    "name": ag["name"],
+                    "status": ag["status"],
+                    "ad_count": ad_count,
+                    "spend": sp,
+                    "impressions": im,
+                    "clicks": cl,
+                    "ctr": round(cl / im * 100, 2) if im else 0,
+                    "cpc": round(sp / cl, 2) if cl else 0,
+                    "leads": 0,
+                    "cost_per_lead": 0,
+                    "ads": ag["ads"],
+                })
+            return sorted(adsets, key=lambda x: x["spend"], reverse=True)
+
+        all_campaign_maps = list(campaign_map.values()) + list(pmax_map.values())
+        campaigns_out = []
+        total_leaf_items = 0
+
+        for cm in all_campaign_maps:
+            sp = round(cm["spend"], 2)
+            cl = cm["clicks"]
+            im = cm["impressions"]
+            adsets = _build_adsets(cm["adgroups"])
+            adset_count = len(adsets)
+            ad_count = sum(a["ad_count"] for a in adsets)
+            leads = round(leads_by_campaign.get(cm["id"], 0))
+            cpl = round(sp / leads, 2) if leads else 0
+            campaigns_out.append({
+                "id": cm["id"],
+                "name": cm["name"],
+                "status": cm["status"],
+                "is_pmax": cm["is_pmax"],
+                "adset_count": adset_count,
+                "ad_count": ad_count,
+                "spend": sp,
+                "impressions": im,
+                "clicks": cl,
+                "ctr": round(cl / im * 100, 2) if im else 0,
+                "cpc": round(sp / cl, 2) if cl else 0,
+                "leads": leads,
+                "cost_per_lead": cpl,
+                "adsets": adsets,
+            })
+            # leaf items: ads for standard, asset groups for pmax
+            total_leaf_items += ad_count if not cm["is_pmax"] else adset_count
+
+        campaigns_out.sort(key=lambda x: x["spend"], reverse=True)
+
+        return {
+            "success": True,
+            "total_active_ads": total_leaf_items,
+            "mode": mode,
+            "campaigns": campaigns_out,
+        }
+
     # ------------------------------------------------------------------
     # Conversion action query helpers (MQLs + Opportunities)
     # ------------------------------------------------------------------
