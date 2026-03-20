@@ -33,7 +33,7 @@ const METRICS: MetricConfig[] = [
   { key: "spend", label: "Spend", color: "#1f2937", yAxisId: "left", strokeWidth: 2 },
   { key: "leads", label: "Leads", color: "#22c55e", yAxisId: "right", strokeWidth: 3 },
   { key: "costPerLead", label: "CPL", color: "#f59e0b", yAxisId: "left", strokeWidth: 2 },
-  { key: "clicks", label: "Clicks", color: "#6366f1", yAxisId: "right", strokeWidth: 2 },
+  { key: "clicks", label: "Clicks", color: "#f27038", yAxisId: "right", strokeWidth: 2 },
   { key: "conversions", label: "Conversions", color: "#ec4899", yAxisId: "right", strokeWidth: 2 },
 ];
 

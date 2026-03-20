@@ -7,8 +7,9 @@ through the SingleGrain MCP Gateway. No scraping required.
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any, Dict, Tuple
 import asyncio
+import time
 import structlog
 from datetime import datetime
 
@@ -17,6 +18,29 @@ from app.services.live_api import DateRange
 from app.config import get_settings
 
 logger = structlog.get_logger(__name__)
+
+# ── In-memory response cache ──────────────────────────────────────────────────
+# Keyed by (tool_name, accountId, startDate, endDate) → (result, expiry_monotonic)
+# Eliminates redundant gateway calls when the overview and active-ads-tree
+# endpoints request the same date range within the same minute.
+_CACHE_TTL = 90  # seconds
+_cache: Dict[str, Tuple[Any, float]] = {}
+
+async def _cached_call(mcp, tool_name: str, account_id: str, start_date: str, end_date: str) -> Any:
+    key = f"{tool_name}|{account_id}|{start_date}|{end_date}"
+    now = time.monotonic()
+    if key in _cache:
+        value, expiry = _cache[key]
+        if now < expiry:
+            logger.debug("microsoft_cache_hit", tool=tool_name, start=start_date, end=end_date)
+            return value
+    result = await mcp.call_tool(tool_name, {
+        "accountId": account_id,
+        "startDate": start_date,
+        "endDate": end_date,
+    })
+    _cache[key] = (result, now + _CACHE_TTL)
+    return result
 
 router = APIRouter(prefix="/api/microsoft", tags=["microsoft-ads"])
 
@@ -149,16 +173,8 @@ async def get_microsoft_overview(
 
     try:
         current_raw, prior_raw = await asyncio.gather(
-            mcp.call_tool("microsoft_ads_campaign_performance", {
-                "accountId": account_id,
-                "startDate": start_date,
-                "endDate": end_date,
-            }),
-            mcp.call_tool("microsoft_ads_campaign_performance", {
-                "accountId": account_id,
-                "startDate": prior_range.start_date,
-                "endDate": prior_range.end_date,
-            }),
+            _cached_call(mcp, "microsoft_ads_campaign_performance", account_id, start_date, end_date),
+            _cached_call(mcp, "microsoft_ads_campaign_performance", account_id, prior_range.start_date, prior_range.end_date),
         )
     except Exception as e:
         logger.error("microsoft_overview_error", error=str(e))
@@ -218,11 +234,7 @@ async def get_microsoft_campaigns(
         return []
 
     try:
-        raw = await mcp.call_tool("microsoft_ads_campaign_performance", {
-            "accountId": SCHUMACHER_MICROSOFT_ACCOUNT_ID,
-            "startDate": start_date,
-            "endDate": end_date,
-        })
+        raw = await _cached_call(mcp, "microsoft_ads_campaign_performance", SCHUMACHER_MICROSOFT_ACCOUNT_ID, start_date, end_date)
         rows = raw if isinstance(raw, list) else raw.get("data", [])
         return _format_campaigns(rows)
     except Exception as e:
@@ -403,16 +415,8 @@ async def get_microsoft_active_ads_tree(
 
     try:
         campaign_raw, ad_group_raw = await asyncio.gather(
-            mcp.call_tool("microsoft_ads_campaign_performance", {
-                "accountId": account_id,
-                "startDate": start_date,
-                "endDate": end_date,
-            }),
-            mcp.call_tool("microsoft_ads_ad_group_performance", {
-                "accountId": account_id,
-                "startDate": start_date,
-                "endDate": end_date,
-            }),
+            _cached_call(mcp, "microsoft_ads_campaign_performance", account_id, start_date, end_date),
+            _cached_call(mcp, "microsoft_ads_ad_group_performance", account_id, start_date, end_date),
         )
     except Exception as e:
         logger.error("microsoft_active_ads_tree_error", error=str(e))

@@ -180,14 +180,14 @@ export default function OverviewPage() {
               title="Total Opportunities"
               value={formatNumber(totalOpps)}
               icon={<Target className="h-4 w-4" />}
-              className="border-2 border-purple-200 bg-purple-50/50"
+              className="border-2 border-[#f27038]/30 bg-[#f27038]/5"
             />
             <MetricCard
               title="Blended Cost / Opp"
               value={formatCurrency(blendedCpo)}
               invertTrend
               icon={<Users className="h-4 w-4" />}
-              className="border-2 border-purple-200 bg-purple-50/50"
+              className="border-2 border-[#f27038]/30 bg-[#f27038]/5"
             />
           </div>
         </div>
@@ -195,7 +195,7 @@ export default function OverviewPage() {
         {/* ── Meta ──────────────────────────────────────────────── */}
         <div>
           <a href="/meta" className="group flex items-center gap-2 mb-3">
-            <div className="w-3 h-3 rounded-full bg-blue-500" />
+            <div className="w-3 h-3 rounded-full bg-[#f27038]" />
             <h2 className="text-lg font-semibold group-hover:underline">Meta</h2>
             {metaConnected === null ? (
               <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">Loading...</span>
@@ -208,19 +208,19 @@ export default function OverviewPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <MetricCard title="Spend" value={formatCurrency(metaSpend)}
               change={metaData?.spend_change} icon={<DollarSign className="h-4 w-4" />}
-              className="border-l-4 border-l-blue-500" />
+              className="border-l-4 border-l-[#f27038]" />
             <MetricCard title="Total Leads" value={formatNumber(metaLeads)}
               change={metaData?.leads_change} icon={<UserPlus className="h-4 w-4" />}
-              className="border-l-4 border-l-blue-500" />
+              className="border-l-4 border-l-[#f27038]" />
             <MetricCard title="Blended CPL" value={formatCurrency(metaData?.cost_per_lead ?? 0)}
               change={metaData?.cost_per_lead_change} invertTrend icon={<Users className="h-4 w-4" />}
-              className="border-l-4 border-l-blue-500" />
+              className="border-l-4 border-l-[#f27038]" />
             <MetricCard title="Remarketing CPL" value={formatCurrency(metaData?.remarketing_cpl ?? 0)}
               subtitle={`${formatNumber(metaData?.remarketing_leads ?? 0)} leads · ${formatCurrency(metaData?.remarketing_spend ?? 0)} spend`}
-              icon={<RefreshCw className="h-4 w-4" />} className="border-l-4 border-l-blue-500" />
+              icon={<RefreshCw className="h-4 w-4" />} className="border-l-4 border-l-[#f27038]" />
             <MetricCard title="Prospecting CPL" value={formatCurrency(metaData?.prospecting_cpl ?? 0)}
               subtitle={`${formatNumber(metaData?.prospecting_leads ?? 0)} leads · ${formatCurrency(metaData?.prospecting_spend ?? 0)} spend`}
-              icon={<Megaphone className="h-4 w-4" />} className="border-l-4 border-l-blue-500" />
+              icon={<Megaphone className="h-4 w-4" />} className="border-l-4 border-l-[#f27038]" />
           </div>
         </div>
 
@@ -259,7 +259,7 @@ export default function OverviewPage() {
         {/* ── Microsoft Ads ─────────────────────────────────────── */}
         <div>
           <a href="/microsoft" className="group flex items-center gap-2 mb-3">
-            <div className={`w-3 h-3 rounded-full ${msConnected ? "bg-cyan-500" : "bg-gray-400"}`} />
+            <div className={`w-3 h-3 rounded-full ${msConnected ? "bg-[#f27038]" : "bg-gray-400"}`} />
             <h2 className="text-lg font-semibold group-hover:underline">Microsoft Ads</h2>
             {msConnected ? (
               <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">Live</span>
@@ -274,23 +274,23 @@ export default function OverviewPage() {
             <MetricCard title="Spend"
               value={msConnected ? formatCurrency(msSpend) : "—"}
               change={microsoftData?.spend_change}
-              icon={<Monitor className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
+              icon={<Monitor className="h-4 w-4" />} className="border-l-4 border-l-[#f27038]" />
             <MetricCard title="Leads"
               value={msConnected ? formatNumber(msLeads) : "—"}
               change={microsoftData?.leads_change}
-              icon={<UserPlus className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
+              icon={<UserPlus className="h-4 w-4" />} className="border-l-4 border-l-[#f27038]" />
             <MetricCard title="Cost / Lead"
               value={msConnected ? formatCurrency(microsoftData?.cost_per_lead ?? 0) : "—"}
               change={microsoftData?.cost_per_lead_change}
-              invertTrend icon={<Users className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
+              invertTrend icon={<Users className="h-4 w-4" />} className="border-l-4 border-l-[#f27038]" />
             <MetricCard title="Clicks"
               value={msConnected ? formatNumber(microsoftData?.clicks ?? 0) : "—"}
               change={microsoftData?.clicks_change}
-              icon={<Target className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
+              icon={<Target className="h-4 w-4" />} className="border-l-4 border-l-[#f27038]" />
             <MetricCard title="Avg. CPC"
               value={msConnected ? formatCurrency(microsoftData?.cpc ?? 0) : "—"}
               change={microsoftData?.cpc_change}
-              invertTrend icon={<DollarSign className="h-4 w-4" />} className="border-l-4 border-l-cyan-500" />
+              invertTrend icon={<DollarSign className="h-4 w-4" />} className="border-l-4 border-l-[#f27038]" />
           </div>
         </div>
       </div>

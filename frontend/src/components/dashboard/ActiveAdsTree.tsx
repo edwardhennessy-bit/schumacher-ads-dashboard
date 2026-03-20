@@ -187,7 +187,7 @@ function KpiBar({ spend, clicks, ctr, cpc, leads, cost_per_lead, size = "sm" }: 
         </span>
       ) : null}
       {cost_per_lead && leads ? (
-        <span className={`${pill} bg-blue-50 text-blue-700 font-medium`}>
+        <span className={`${pill} bg-[#f27038]/10 text-[#f27038] font-medium`}>
           {fmt$(cost_per_lead)} CPL
         </span>
       ) : null}
@@ -232,7 +232,7 @@ function AdSetRow({ adset, platform }: { adset: ActiveAdSet; platform?: "meta" |
           ) : (
             <ChevronRight className="h-3.5 w-3.5 text-gray-400 shrink-0" />
           )}
-          <Layout className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+          <Layout className="h-3.5 w-3.5 text-[#f27038] shrink-0" />
           <span className="flex-1 text-sm text-gray-700 truncate">{adset.name}</span>
           <span className="text-xs text-gray-400 shrink-0 ml-2">
             {adset.ad_count} {adset.ad_count === 1 ? "ad" : "ads"}
@@ -280,7 +280,7 @@ function CampaignRow({ campaign, groupLabel, platform }: { campaign: ActiveCampa
           ) : (
             <ChevronRight className="h-4 w-4 text-gray-400 shrink-0" />
           )}
-          <Megaphone className="h-4 w-4 text-indigo-400 shrink-0" />
+          <Megaphone className="h-4 w-4 text-[#f27038] shrink-0" />
           <span className="flex-1 text-sm font-medium text-gray-800 truncate">
             {campaign.name}
           </span>
@@ -393,42 +393,49 @@ export function ActiveAdsTree({
       } overflow-hidden`}
     >
       {/* Header / toggle */}
-      <button
-        onClick={handleToggle}
-        className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-gray-50/60 transition-colors"
-      >
-        {open ? (
-          <ChevronDown className="h-5 w-5 text-gray-400 shrink-0" />
-        ) : (
-          <ChevronRight className="h-5 w-5 text-gray-400 shrink-0" />
-        )}
-        <Layers
-          className={`h-5 w-5 shrink-0 ${atThreshold ? "text-red-400" : "text-gray-400"}`}
-        />
-        <div className="flex-1 flex items-center gap-4">
-          <span className="font-semibold text-gray-800">
-            {adsMode === "with_spend" ? "Ads with Spend" : "Active Ads"}
-          </span>
-          <span
-            className={`text-sm font-medium ${
-              atThreshold ? "text-red-600" : "text-gray-600"
-            }`}
-          >
-            {hasThreshold ? `${totalActiveAds} / ${threshold}` : totalActiveAds}
-          </span>
-          {atThreshold && (
-            <span className="text-xs font-medium text-red-500 bg-red-100 px-2 py-0.5 rounded-full">
-              Near limit
-            </span>
+      <div className="flex items-center gap-3 w-full px-5 py-4 hover:bg-gray-50/60 transition-colors">
+        {/* Clickable toggle area */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={handleToggle}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleToggle(); }}
+          className="flex items-center gap-3 flex-1 cursor-pointer min-w-0"
+        >
+          {open ? (
+            <ChevronDown className="h-5 w-5 text-gray-400 shrink-0" />
+          ) : (
+            <ChevronRight className="h-5 w-5 text-gray-400 shrink-0" />
           )}
+          <Layers
+            className={`h-5 w-5 shrink-0 ${atThreshold ? "text-red-400" : "text-gray-400"}`}
+          />
+          <div className="flex items-center gap-4 min-w-0">
+            <span className="font-semibold text-gray-800">
+              {adsMode === "with_spend" ? "Ads with Spend" : "Active Ads"}
+            </span>
+            <span
+              className={`text-sm font-medium ${
+                atThreshold ? "text-red-600" : "text-gray-600"
+              }`}
+            >
+              {hasThreshold ? `${totalActiveAds} / ${threshold}` : totalActiveAds}
+            </span>
+            {atThreshold && (
+              <span className="text-xs font-medium text-red-500 bg-red-100 px-2 py-0.5 rounded-full">
+                Near limit
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+        {/* Right actions — kept outside any button to avoid nesting */}
+        <div className="flex items-center gap-2 shrink-0">
           <AskJarvisButton section="active_ads" />
-          <span className="text-xs text-gray-400">
+          <span className="text-xs text-gray-400 cursor-pointer" onClick={handleToggle}>
             {open ? "Collapse" : "View breakdown"}
           </span>
         </div>
-      </button>
+      </div>
 
       {/* Tree body */}
       {open && (
@@ -441,7 +448,7 @@ export function ActiveAdsTree({
                 onClick={() => handleAdsModeChange("active")}
                 className={`text-xs px-2.5 py-1 transition-colors ${
                   adsMode === "active"
-                    ? "bg-indigo-600 text-white font-medium"
+                    ? "bg-[#f27038] text-white font-medium"
                     : "text-gray-500 hover:bg-gray-50"
                 }`}
               >
@@ -451,7 +458,7 @@ export function ActiveAdsTree({
                 onClick={() => handleAdsModeChange("with_spend")}
                 className={`text-xs px-2.5 py-1 border-l border-gray-200 transition-colors ${
                   adsMode === "with_spend"
-                    ? "bg-indigo-600 text-white font-medium"
+                    ? "bg-[#f27038] text-white font-medium"
                     : "text-gray-500 hover:bg-gray-50"
                 }`}
               >
@@ -461,7 +468,7 @@ export function ActiveAdsTree({
             <select
               value={selectedPreset}
               onChange={(e) => handlePresetChange(e.target.value)}
-              className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:ring-1 focus:ring-indigo-300 outline-none"
+              className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:ring-1 focus:ring-[#f27038]/50 outline-none"
             >
               {PRESETS.map((p) => (
                 <option key={p.value} value={p.value}>
@@ -474,7 +481,7 @@ export function ActiveAdsTree({
                 type="checkbox"
                 checked={compareEnabled}
                 onChange={(e) => setCompareEnabled(e.target.checked)}
-                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-300"
+                className="rounded border-gray-300 text-[#f27038] focus:ring-[#f27038]/50"
               />
               Compare to prior period
             </label>
@@ -482,7 +489,7 @@ export function ActiveAdsTree({
               <select
                 value={comparePreset}
                 onChange={(e) => handleComparePresetChange(e.target.value)}
-                className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:ring-1 focus:ring-indigo-300 outline-none"
+                className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white focus:ring-1 focus:ring-[#f27038]/50 outline-none"
               >
                 {PRESETS.map((p) => (
                   <option key={p.value} value={p.value}>

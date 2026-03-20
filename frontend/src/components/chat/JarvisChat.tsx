@@ -268,12 +268,12 @@ function EmailReportBlock({ content }: { content: string }) {
   }, [subject, body]);
 
   return (
-    <div className="my-4 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 overflow-hidden">
+    <div className="my-4 rounded-lg border border-[#f27038]/30 bg-[#f27038]/5 overflow-hidden">
       {/* Header bar */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-blue-100/60 dark:bg-blue-900/30 border-b border-blue-200 dark:border-blue-800">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-[#f27038]/10 border-b border-[#f27038]/20">
         <div className="flex items-center gap-2">
-          <Mail className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-          <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">Client Email Report</span>
+          <Mail className="h-3.5 w-3.5 text-[#f27038]" />
+          <span className="text-xs font-semibold text-[#f27038]">Client Email Report</span>
         </div>
         <button
           onClick={handleCopy}
@@ -281,7 +281,7 @@ function EmailReportBlock({ content }: { content: string }) {
             "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md font-medium transition-all",
             copied
               ? "bg-green-500 text-white"
-              : "bg-blue-600 hover:bg-blue-700 text-white"
+              : "bg-[#f27038] hover:bg-[#d4612e] text-white"
           )}
         >
           {copied ? <><Check className="h-3 w-3" /> Copied!</> : <><Copy className="h-3 w-3" /> Copy</>}
@@ -290,8 +290,8 @@ function EmailReportBlock({ content }: { content: string }) {
 
       {/* Subject line */}
       {subject && (
-        <div className="px-4 py-2 border-b border-blue-200 dark:border-blue-800 bg-white/40 dark:bg-black/10">
-          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Subject: </span>
+        <div className="px-4 py-2 border-b border-[#f27038]/20 bg-white/40">
+          <span className="text-xs text-[#f27038] font-medium">Subject: </span>
           <span className="text-xs font-semibold text-foreground">{subject}</span>
         </div>
       )}
@@ -380,7 +380,7 @@ function BudgetTableBlock({ rows }: { rows: BudgetRow[] }) {
   return (
     <div className="my-4 space-y-3">
       <div className="flex items-center gap-2 text-sm font-semibold text-foreground mb-3">
-        <TrendingUp className="h-4 w-4 text-blue-500" />
+        <TrendingUp className="h-4 w-4 text-[#f27038]" />
         <span>Budget Allocation Recommendations</span>
       </div>
       <div className="overflow-x-auto rounded-lg border border-border">
@@ -784,7 +784,7 @@ export function JarvisChat() {
                 <button
                   key={text}
                   onClick={() => sendMessage(text)}
-                  className="px-3 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors text-left"
+                  className="px-3 py-2 rounded-lg bg-muted hover:bg-[#f27038]/10 hover:border-[#f27038]/30 border border-transparent transition-colors text-left"
                 >
                   {emoji} {text}
                 </button>

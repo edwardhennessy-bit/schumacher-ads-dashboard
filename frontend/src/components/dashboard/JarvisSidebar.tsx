@@ -192,8 +192,8 @@ function JarvisForm({
               onClick={() => setPrompt(pick.prompt)}
               className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors text-left w-full
                 ${prompt === pick.prompt
-                  ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                  : "border-gray-200 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700"
+                  ? "border-[#f27038]/50 bg-[#f27038]/10 text-[#f27038]"
+                  : "border-gray-200 bg-gray-50 hover:bg-[#f27038]/10 hover:border-[#f27038]/30 hover:text-[#f27038]"
                 }`}
             >
               {pick.label}
@@ -213,7 +213,7 @@ function JarvisForm({
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="e.g. Focus on remarketing performance and flag any ads with CPL above $60"
           className={`text-sm border border-gray-200 rounded-lg p-2.5 w-full resize-none
-            focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none
+            focus:ring-2 focus:ring-[#f27038]/50 focus:border-[#f27038]/50 outline-none
             overflow-hidden leading-relaxed
             ${expanded ? "min-h-[180px] flex-1" : "min-h-[80px]"}`}
           style={expanded ? {} : { maxHeight: "240px", overflowY: "auto" }}
@@ -240,7 +240,7 @@ function JarvisForm({
               setShowAddChannel(false);
             }
           }}
-          className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
+          className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-[#f27038]/50 focus:border-[#f27038]/50 outline-none bg-white"
         >
           {channels.map((ch) => (
             <option key={ch} value={ch}>
@@ -252,15 +252,15 @@ function JarvisForm({
 
         {/* Add-to-channel panel */}
         {showAddChannel && (
-          <div className="mt-2 rounded-lg border border-indigo-100 bg-indigo-50 p-3 space-y-2.5">
+          <div className="mt-2 rounded-lg border border-[#f27038]/20 bg-[#f27038]/5 p-3 space-y-2.5">
             {/* Instructions */}
             <div className="flex gap-2">
-              <Info className="h-3.5 w-3.5 text-indigo-400 shrink-0 mt-0.5" />
-              <div className="text-xs text-indigo-800 space-y-1">
+              <Info className="h-3.5 w-3.5 text-[#f27038] shrink-0 mt-0.5" />
+              <div className="text-xs text-gray-700 space-y-1">
                 <p className="font-semibold">Invite JARVIS to a channel first:</p>
-                <ol className="list-decimal list-inside space-y-0.5 text-indigo-700">
+                <ol className="list-decimal list-inside space-y-0.5 text-gray-600">
                   <li>Open the Slack channel you want to add</li>
-                  <li>Type <code className="bg-indigo-100 px-1 rounded font-mono">/invite @Jarvis</code> and send</li>
+                  <li>Type <code className="bg-[#f27038]/10 px-1 rounded font-mono">/invite @Jarvis</code> and send</li>
                   <li>Then enter the channel name below</li>
                 </ol>
               </div>
@@ -268,8 +268,8 @@ function JarvisForm({
 
             {/* Channel name input */}
             <div className="flex gap-1.5">
-              <div className="flex items-center gap-1 flex-1 border border-indigo-200 rounded-lg bg-white px-2 focus-within:ring-2 focus-within:ring-indigo-300">
-                <Hash className="h-3 w-3 text-indigo-400 shrink-0" />
+              <div className="flex items-center gap-1 flex-1 border border-[#f27038]/30 rounded-lg bg-white px-2 focus-within:ring-2 focus-within:ring-[#f27038]/50">
+                <Hash className="h-3 w-3 text-[#f27038] shrink-0" />
                 <input
                   type="text"
                   value={newChannelName}
@@ -283,7 +283,7 @@ function JarvisForm({
               <button
                 onClick={handleAddChannel}
                 disabled={!newChannelName.trim() || addingChannel}
-                className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-1"
+                className="text-xs bg-[#f27038] hover:bg-[#d4612e] text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-1"
               >
                 {addingChannel ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
                 Add
@@ -315,7 +315,7 @@ function JarvisForm({
           <select
             value={scheduleDay}
             onChange={(e) => handleDayChange(e.target.value)}
-            className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
+            className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-[#f27038]/50 focus:border-[#f27038]/50 outline-none bg-white"
           >
             {DAYS.map((d) => (
               <option key={d} value={d}>
@@ -326,7 +326,7 @@ function JarvisForm({
           <select
             value={scheduleHour}
             onChange={(e) => handleHourChange(Number(e.target.value))}
-            className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white"
+            className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-[#f27038]/50 focus:border-[#f27038]/50 outline-none bg-white"
           >
             {Array.from({ length: 24 }, (_, i) => (
               <option key={i} value={i}>
@@ -339,7 +339,7 @@ function JarvisForm({
         <select
           value={scheduleTimezone}
           onChange={(e) => handleTimezoneChange(e.target.value)}
-          className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none bg-white mb-2"
+          className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-[#f27038]/50 focus:border-[#f27038]/50 outline-none bg-white mb-2"
         >
           {TIMEZONES.map((tz) => (
             <option key={tz.value} value={tz.value}>
@@ -356,7 +356,7 @@ function JarvisForm({
               ? "border-green-300 bg-green-50 text-green-700"
               : scheduleSaveState === "error"
               ? "border-red-300 bg-red-50 text-red-700"
-              : "border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+              : "border-[#f27038]/50 text-[#f27038] hover:bg-[#f27038]/5 disabled:opacity-50"
             }`}
         >
           {scheduleSaveState === "saving" ? (
@@ -376,7 +376,7 @@ function JarvisForm({
         <button
           onClick={handleSend}
           disabled={isSending || !prompt.trim()}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-4 py-2.5 w-full font-medium text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="bg-[#f27038] hover:bg-[#d4612e] text-white rounded-lg px-4 py-2.5 w-full font-medium text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isSending ? (
             <>
@@ -531,17 +531,17 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
       {/* ── Sidebar panel ───────────────────────────────────────────────── */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm w-80 shrink-0 flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-t-xl px-4 py-3">
+        <div className="bg-gradient-to-br from-[#1e1e1e] to-[#2a2a2a] rounded-t-xl px-4 py-3">
           <div className="flex items-center gap-2">
             <span className="text-xl">🤖</span>
             <div className="flex-1 min-w-0">
               <div className="text-white font-bold text-sm">Ask JARVIS</div>
-              <div className="text-indigo-200 text-xs">Send a custom report to Slack</div>
+              <div className="text-gray-400 text-xs">Send a custom report to Slack</div>
             </div>
             <button
               onClick={() => setIsExpanded(true)}
               title="Expand to full view"
-              className="ml-auto text-indigo-200 hover:text-white transition-colors p-1 rounded hover:bg-white/10"
+              className="ml-auto text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-white/10"
             >
               <Maximize2 className="h-4 w-4" />
             </button>
@@ -566,18 +566,18 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
           {/* Modal panel */}
           <div className="relative z-10 bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
             {/* Modal header */}
-            <div className="bg-gradient-to-br from-indigo-600 to-purple-700 px-6 py-4 flex items-center gap-3 shrink-0">
+            <div className="bg-gradient-to-br from-[#1e1e1e] to-[#2a2a2a] px-6 py-4 flex items-center gap-3 shrink-0">
               <span className="text-2xl">🤖</span>
               <div className="flex-1 min-w-0">
                 <div className="text-white font-bold text-base">Ask JARVIS</div>
-                <div className="text-indigo-200 text-sm">
+                <div className="text-gray-400 text-sm">
                   Customize and send a report to Slack · {startDate} – {endDate}
                 </div>
               </div>
               <button
                 onClick={() => setIsExpanded(false)}
                 title="Collapse to sidebar"
-                className="text-indigo-200 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/10 flex items-center gap-1.5"
+                className="text-gray-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/10 flex items-center gap-1.5"
               >
                 <Minimize2 className="h-4 w-4" />
                 <span className="text-xs">Collapse</span>
@@ -585,7 +585,7 @@ export function JarvisSidebar({ startDate, endDate }: JarvisSidebarProps) {
               <button
                 onClick={() => setIsExpanded(false)}
                 title="Close"
-                className="text-indigo-200 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/10"
+                className="text-gray-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/10"
               >
                 <X className="h-4 w-4" />
               </button>

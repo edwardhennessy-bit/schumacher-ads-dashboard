@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  Megaphone,
   ClipboardCheck,
   Bell,
   Settings,
@@ -51,11 +50,6 @@ const navItems = [
     icon: FileText,
   },
   {
-    label: "Campaigns",
-    href: "/campaigns",
-    icon: Megaphone,
-  },
-  {
     label: "Audits",
     href: "/audits",
     icon: ClipboardCheck,
@@ -90,14 +84,14 @@ export function Sidebar() {
   }, []);
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r bg-card">
+    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-[#2a2a2a] bg-[#1e1e1e]">
       <div className="flex h-full flex-col">
         {/* Logo */}
-        <div className="flex h-16 items-center gap-2 border-b px-6">
-          <Home className="h-6 w-6 text-primary" />
+        <div className="flex h-16 items-center gap-2 border-b border-[#2a2a2a] px-6">
+          <span className="text-xl">🏠</span>
           <div className="flex flex-col">
-            <span className="text-lg font-bold">Schumacher</span>
-            <span className="text-xs text-muted-foreground">Ads Dashboard</span>
+            <span className="text-lg font-bold text-white">Schumacher</span>
+            <span className="text-xs text-gray-500">Ads Dashboard</span>
           </div>
         </div>
 
@@ -112,8 +106,8 @@ export function Sidebar() {
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                   isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    ? "bg-[#f27038] text-white"
+                    : "text-gray-400 hover:bg-white/10 hover:text-white"
                 )}
               >
                 <item.icon className="h-4 w-4" />
@@ -124,30 +118,30 @@ export function Sidebar() {
         </nav>
 
         {/* Footer */}
-        <div className="border-t p-4 space-y-2">
-          <div className={cn(
-            "rounded-lg p-3",
-            apiConnected ? "bg-green-50 dark:bg-green-950" : "bg-muted"
-          )}>
-            <p className="text-xs font-medium">
-              {apiConnected ? "Meta: Connected" : "Meta: Not Connected"}
-            </p>
+        <div className="border-t border-[#2a2a2a] p-4 space-y-2">
+          <div className="rounded-lg p-3 bg-white/10">
+            <div className="flex items-center gap-2">
+              {apiConnected && <span className="w-2 h-2 rounded-full bg-[#f27038] shrink-0" />}
+              <p className="text-xs font-medium text-gray-300">
+                {apiConnected ? "Meta: Connected" : "Meta: Not Connected"}
+              </p>
+            </div>
           </div>
-          <div className={cn(
-            "rounded-lg p-3",
-            googleConnected ? "bg-green-50 dark:bg-green-950" : "bg-muted"
-          )}>
-            <p className="text-xs font-medium">
-              {googleConnected ? "Google: Connected" : "Google: Not Connected"}
-            </p>
+          <div className="rounded-lg p-3 bg-white/10">
+            <div className="flex items-center gap-2">
+              {googleConnected && <span className="w-2 h-2 rounded-full bg-[#f27038] shrink-0" />}
+              <p className="text-xs font-medium text-gray-300">
+                {googleConnected ? "Google: Connected" : "Google: Not Connected"}
+              </p>
+            </div>
           </div>
-          <div className={cn(
-            "rounded-lg p-3",
-            microsoftConnected ? "bg-green-50 dark:bg-green-950" : "bg-muted"
-          )}>
-            <p className="text-xs font-medium">
-              {microsoftConnected ? "Microsoft: Connected" : "Microsoft: Not Connected"}
-            </p>
+          <div className="rounded-lg p-3 bg-white/10">
+            <div className="flex items-center gap-2">
+              {microsoftConnected && <span className="w-2 h-2 rounded-full bg-[#f27038] shrink-0" />}
+              <p className="text-xs font-medium text-gray-300">
+                {microsoftConnected ? "Microsoft: Connected" : "Microsoft: Not Connected"}
+              </p>
+            </div>
           </div>
         </div>
       </div>

@@ -253,7 +253,7 @@ export default function GoogleDashboardPage() {
             value={formatNumber(metrics.opportunities)}
             change={metrics.opportunitiesChange}
             icon={<Target className="h-4 w-4" />}
-            className="border-2 border-purple-200 bg-purple-50/50"
+            className="border-2 border-[#f27038]/30 bg-[#f27038]/5"
           />
           <MetricCard
             title="Cost / Opportunity"
@@ -261,14 +261,14 @@ export default function GoogleDashboardPage() {
             change={metrics.costPerOpportunityChange}
             invertTrend
             icon={<Users className="h-4 w-4" />}
-            className="border-2 border-purple-200 bg-purple-50/50"
+            className="border-2 border-[#f27038]/30 bg-[#f27038]/5"
           />
           <MetricCard
             title="Total Spend"
             value={formatCurrency(metrics.spend)}
             change={metrics.spendChange}
             icon={<DollarSign className="h-4 w-4" />}
-            className="border-2 border-blue-200 bg-blue-50/50"
+            className="border-2 border-[#f27038]/30 bg-[#f27038]/5"
           />
         </div>
 

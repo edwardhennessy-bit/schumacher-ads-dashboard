@@ -432,7 +432,7 @@ function Slide5({ content, apiBase }: { content: Record<string, unknown>; apiBas
           })}
         </div>
       )}
-      {content.note && (
+      {!!content.note && (
         <p className="text-xs text-gray-400 mt-3 italic">{content.note as string}</p>
       )}
     </SlideShell>

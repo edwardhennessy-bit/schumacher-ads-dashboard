@@ -275,14 +275,14 @@ export default function DashboardPage() {
                 value={formatCurrency(metrics.remarketingCpl || 0)}
                 subtitle={`${formatNumber(metrics.remarketingLeads || 0)} leads`}
                 icon={<RefreshCw className="h-4 w-4" />}
-                className="border-2 border-blue-200 bg-blue-50/50"
+                className="border-2 border-[#f27038]/30 bg-[#f27038]/5"
               />
               <MetricCard
                 title="Prospecting CPL"
                 value={formatCurrency(metrics.prospectingCpl || 0)}
                 subtitle={`${formatNumber(metrics.prospectingLeads || 0)} leads`}
                 icon={<Megaphone className="h-4 w-4" />}
-                className="border-2 border-purple-200 bg-purple-50/50"
+                className="border-2 border-[#f27038]/30 bg-[#f27038]/5"
               />
               <MetricCard
                 title="Active Ads"

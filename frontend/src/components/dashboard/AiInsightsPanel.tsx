@@ -56,30 +56,30 @@ export function AiInsightsPanel({
   }, [fetchInsights]);
 
   return (
-    <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl p-4">
+    <div className="bg-gradient-to-r from-[#f27038]/5 to-[#f27038]/10 border border-[#f27038]/20 rounded-xl p-4">
       {/* Header */}
       <div className="flex items-center gap-2 mb-3">
         <span className="text-lg">🧠</span>
-        <span className="text-indigo-700 font-semibold text-sm">AI Insights</span>
+        <span className="text-[#f27038] font-semibold text-sm">AI Insights</span>
         {period && !isLoading && (
           <span className="text-xs text-gray-500 ml-1">{period}</span>
         )}
         <button
           onClick={fetchInsights}
           disabled={isLoading}
-          className="ml-auto p-1 rounded hover:bg-indigo-100 transition-colors disabled:opacity-50"
+          className="ml-auto p-1 rounded hover:bg-[#f27038]/10 transition-colors disabled:opacity-50"
           title="Refresh insights"
         >
-          <RefreshCw className={`h-3.5 w-3.5 text-indigo-400 ${isLoading ? "animate-spin" : ""}`} />
+          <RefreshCw className={`h-3.5 w-3.5 text-[#f27038] ${isLoading ? "animate-spin" : ""}`} />
         </button>
       </div>
 
       {/* Loading state */}
       {isLoading && (
         <div className="space-y-2 animate-pulse">
-          <div className="h-3.5 bg-indigo-100 rounded w-3/4" />
-          <div className="h-3 bg-indigo-100 rounded w-full" />
-          <div className="h-3 bg-indigo-100 rounded w-5/6" />
+          <div className="h-3.5 bg-[#f27038]/10 rounded w-3/4" />
+          <div className="h-3 bg-[#f27038]/10 rounded w-full" />
+          <div className="h-3 bg-[#f27038]/10 rounded w-5/6" />
         </div>
       )}
 
@@ -99,7 +99,7 @@ export function AiInsightsPanel({
             <ul className="space-y-1 mb-3">
               {insights.bullets.map((bullet, i) => (
                 <li key={i} className="flex gap-2 text-sm text-gray-700">
-                  <span className="text-indigo-500 shrink-0 font-bold">•</span>
+                  <span className="text-[#f27038] shrink-0 font-bold">•</span>
                   <span>{bullet}</span>
                 </li>
               ))}

@@ -12,19 +12,19 @@ import { api } from "@/lib/api";
 // ── Section config ────────────────────────────────────────────────────────────
 
 const SECTION_CONFIG: Record<Section, { label: string; color: string; emoji: string }> = {
-  kpi_cards:      { label: "KPI Overview",     color: "blue",   emoji: "📊" },
-  active_ads:     { label: "Active Ads",        color: "indigo", emoji: "📢" },
-  trend_chart:    { label: "Trend Chart",       color: "purple", emoji: "📈" },
-  campaign_table: { label: "Campaigns",         color: "violet", emoji: "🎯" },
+  kpi_cards:      { label: "KPI Overview",     color: "orange", emoji: "📊" },
+  active_ads:     { label: "Active Ads",        color: "orange", emoji: "📢" },
+  trend_chart:    { label: "Trend Chart",       color: "orange", emoji: "📈" },
+  campaign_table: { label: "Campaigns",         color: "orange", emoji: "🎯" },
   alerts:         { label: "Alerts",            color: "orange", emoji: "⚠️"  },
 };
 
 const SECTION_BADGE_CLASSES: Record<string, string> = {
-  blue:   "bg-blue-100 text-blue-700",
-  indigo: "bg-indigo-100 text-indigo-700",
-  purple: "bg-purple-100 text-purple-700",
-  violet: "bg-violet-100 text-violet-700",
-  orange: "bg-orange-100 text-orange-700",
+  blue:   "bg-[#f27038]/10 text-[#f27038]",
+  indigo: "bg-[#f27038]/10 text-[#f27038]",
+  purple: "bg-[#f27038]/10 text-[#f27038]",
+  violet: "bg-[#f27038]/10 text-[#f27038]",
+  orange: "bg-[#f27038]/10 text-[#f27038]",
 };
 
 const SECTION_QUICK_PICKS: Record<Section, Array<{ label: string; prompt: string }>> = {
@@ -165,7 +165,7 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
   return (
     <div className="flex flex-col h-full">
       {/* ── Header ── */}
-      <div className="bg-gradient-to-br from-indigo-600 to-purple-700 px-4 py-3 shrink-0">
+      <div className="bg-gradient-to-br from-[#1e1e1e] to-[#2a2a2a] px-4 py-3 shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-xl">🤖</span>
           <div className="flex-1 min-w-0">
@@ -175,25 +175,25 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
                 {config.emoji} {config.label}
               </span>
             </div>
-            <div className="text-indigo-200 text-xs">AI-powered report assistant</div>
+            <div className="text-gray-400 text-xs">AI-powered report assistant</div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {messages.length > 0 && (
-              <button onClick={() => clearThread(section)} title="Clear thread" className="text-indigo-200 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors">
+              <button onClick={() => clearThread(section)} title="Clear thread" className="text-gray-400 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             )}
             {!expanded && (
-              <button onClick={() => setIsExpanded(true)} title="Expand" className="text-indigo-200 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors">
+              <button onClick={() => setIsExpanded(true)} title="Expand" className="text-gray-400 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors">
                 <Maximize2 className="h-3.5 w-3.5" />
               </button>
             )}
             {expanded && (
-              <button onClick={() => setIsExpanded(false)} title="Collapse" className="text-indigo-200 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors">
+              <button onClick={() => setIsExpanded(false)} title="Collapse" className="text-gray-400 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors">
                 <Minimize2 className="h-3.5 w-3.5" />
               </button>
             )}
-            <button onClick={close} title="Close" className="text-indigo-200 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors">
+            <button onClick={close} title="Close" className="text-gray-400 hover:text-white p-1.5 rounded hover:bg-white/10 transition-colors">
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -207,7 +207,7 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
             <button
               key={pick.label}
               onClick={() => { setInput(pick.prompt); textareaRef.current?.focus(); }}
-              className="text-xs px-2.5 py-1 rounded-full border border-gray-200 bg-white hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700 whitespace-nowrap transition-colors shrink-0"
+              className="text-xs px-2.5 py-1 rounded-full border border-gray-200 bg-white hover:bg-[#f27038]/10 hover:border-[#f27038]/30 hover:text-[#f27038] whitespace-nowrap transition-colors shrink-0"
             >
               {pick.label}
             </button>
@@ -227,13 +227,13 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
         {messages.map((msg) => (
           <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             {msg.role === "assistant" && (
-              <div className="h-6 w-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shrink-0 mr-2 mt-0.5">
+              <div className="h-6 w-6 rounded-full bg-gradient-to-br from-[#f27038] to-[#d4612e] flex items-center justify-center shrink-0 mr-2 mt-0.5">
                 <Bot className="h-3 w-3 text-white" />
               </div>
             )}
             <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words ${
               msg.role === "user"
-                ? "bg-indigo-600 text-white rounded-tr-sm"
+                ? "bg-[#f27038] text-white rounded-tr-sm"
                 : "bg-white border border-gray-200 text-gray-800 shadow-sm rounded-tl-sm"
             }`}>
               {msg.content}
@@ -242,7 +242,7 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
         ))}
         {isTyping && (
           <div className="flex justify-start">
-            <div className="h-6 w-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shrink-0 mr-2 mt-0.5">
+            <div className="h-6 w-6 rounded-full bg-gradient-to-br from-[#f27038] to-[#d4612e] flex items-center justify-center shrink-0 mr-2 mt-0.5">
               <Bot className="h-3 w-3 text-white" />
             </div>
             <div className="bg-white border border-gray-200 shadow-sm rounded-2xl rounded-tl-sm px-3 py-2">
@@ -267,13 +267,13 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
             onKeyDown={handleKeyDown}
             placeholder="Ask JARVIS anything… (Shift+Enter for new line)"
             rows={1}
-            className="flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2 resize-none overflow-hidden focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 outline-none leading-relaxed"
+            className="flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2 resize-none overflow-hidden focus:ring-2 focus:ring-[#f27038]/50 focus:border-[#f27038]/50 outline-none leading-relaxed"
             style={{ maxHeight: "160px" }}
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || isTyping}
-            className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl p-2.5 transition-colors shrink-0 mb-0.5"
+            className="bg-[#f27038] hover:bg-[#d4612e] disabled:opacity-40 text-white rounded-xl p-2.5 transition-colors shrink-0 mb-0.5"
           >
             {isTyping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </button>
@@ -298,27 +298,27 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
                 if (e.target.value === "__add__") setShowAddChannel(true);
                 else { setSelectedChannel(e.target.value); setShowAddChannel(false); }
               }}
-              className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-indigo-300 outline-none bg-white"
+              className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-[#f27038]/50 outline-none bg-white"
             >
               {channels.map(ch => <option key={ch} value={ch}>#{ch}</option>)}
               <option value="__add__">＋ Add a Slack channel…</option>
             </select>
             {showAddChannel && (
-              <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 space-y-2">
+              <div className="rounded-lg border border-[#f27038]/20 bg-[#f27038]/5 p-3 space-y-2">
                 <div className="flex gap-2">
-                  <Info className="h-3.5 w-3.5 text-indigo-400 shrink-0 mt-0.5" />
-                  <div className="text-xs text-indigo-800 space-y-0.5">
+                  <Info className="h-3.5 w-3.5 text-[#f27038] shrink-0 mt-0.5" />
+                  <div className="text-xs text-gray-700 space-y-0.5">
                     <p className="font-semibold">Invite JARVIS to the channel first:</p>
-                    <ol className="list-decimal list-inside text-indigo-700 space-y-0.5">
+                    <ol className="list-decimal list-inside text-gray-600 space-y-0.5">
                       <li>Open the Slack channel</li>
-                      <li>Type <code className="bg-indigo-100 px-1 rounded">/invite @Jarvis</code> and send</li>
+                      <li>Type <code className="bg-[#f27038]/10 px-1 rounded">/invite @Jarvis</code> and send</li>
                       <li>Enter the channel name below</li>
                     </ol>
                   </div>
                 </div>
                 <div className="flex gap-1.5">
-                  <div className="flex items-center gap-1 flex-1 border border-indigo-200 rounded-lg bg-white px-2 focus-within:ring-2 focus-within:ring-indigo-300">
-                    <Hash className="h-3 w-3 text-indigo-400 shrink-0" />
+                  <div className="flex items-center gap-1 flex-1 border border-[#f27038]/30 rounded-lg bg-white px-2 focus-within:ring-2 focus-within:ring-[#f27038]/50">
+                    <Hash className="h-3 w-3 text-[#f27038] shrink-0" />
                     <input
                       type="text"
                       value={newChannelName}
@@ -329,7 +329,7 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
                       autoFocus
                     />
                   </div>
-                  <button onClick={handleAddChannel} disabled={!newChannelName.trim() || addingChannel} className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 flex items-center gap-1">
+                  <button onClick={handleAddChannel} disabled={!newChannelName.trim() || addingChannel} className="text-xs bg-[#f27038] hover:bg-[#d4612e] text-white px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 flex items-center gap-1">
                     {addingChannel ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}Add
                   </button>
                   <button onClick={() => { setShowAddChannel(false); setNewChannelName(""); setAddChannelError(""); }} className="text-gray-400 hover:text-gray-600 px-2 rounded-lg">
@@ -343,7 +343,7 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
               onClick={handleSendToSlack}
               disabled={!hasLastAssistant || slackSendState === "sending"}
               className={`w-full text-sm rounded-lg px-4 py-2 font-medium flex items-center justify-center gap-2 transition-colors
-                ${slackSendState === "sent" ? "bg-green-600 text-white" : slackSendState === "error" ? "bg-red-100 text-red-700 border border-red-300" : "bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-40"}`}
+                ${slackSendState === "sent" ? "bg-green-600 text-white" : slackSendState === "error" ? "bg-red-100 text-red-700 border border-red-300" : "bg-[#f27038] hover:bg-[#d4612e] text-white disabled:opacity-40"}`}
             >
               {slackSendState === "sending" ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Sending…</>
                : slackSendState === "sent" ? <><CheckCircle className="h-3.5 w-3.5" />Sent to Slack!</>
@@ -367,14 +367,14 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
         {showSchedule && (
           <div className="px-3 pb-3 space-y-2">
             <div className="flex gap-2">
-              <select value={scheduleDay} onChange={(e) => handleDayChange(e.target.value)} className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-indigo-300 outline-none bg-white">
+              <select value={scheduleDay} onChange={(e) => handleDayChange(e.target.value)} className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-[#f27038]/50 outline-none bg-white">
                 {DAYS.map(d => <option key={d} value={d}>{DAY_LABELS[d]}</option>)}
               </select>
-              <select value={scheduleHour} onChange={(e) => handleHourChange(Number(e.target.value))} className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-indigo-300 outline-none bg-white">
+              <select value={scheduleHour} onChange={(e) => handleHourChange(Number(e.target.value))} className="text-sm border border-gray-200 rounded-lg p-2 flex-1 focus:ring-2 focus:ring-[#f27038]/50 outline-none bg-white">
                 {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{formatHour(i)}</option>)}
               </select>
             </div>
-            <select value={scheduleTimezone} onChange={(e) => handleTimezoneChange(e.target.value)} className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-indigo-300 outline-none bg-white">
+            <select value={scheduleTimezone} onChange={(e) => handleTimezoneChange(e.target.value)} className="text-sm border border-gray-200 rounded-lg p-2 w-full focus:ring-2 focus:ring-[#f27038]/50 outline-none bg-white">
               {TIMEZONES.map(tz => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
             </select>
             <button
@@ -383,7 +383,7 @@ function DrawerContent({ expanded = false }: { expanded?: boolean }) {
               className={`w-full text-sm rounded-lg px-4 py-2 font-medium flex items-center justify-center gap-2 transition-colors border
                 ${scheduleSaveState === "saved" ? "border-green-300 bg-green-50 text-green-700"
                   : scheduleSaveState === "error" ? "border-red-300 bg-red-50 text-red-700"
-                  : "border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"}`}
+                  : "border-[#f27038]/50 text-[#f27038] hover:bg-[#f27038]/5 disabled:opacity-50"}`}
             >
               {scheduleSaveState === "saving" ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Saving…</>
                : scheduleSaveState === "saved" ? <><CheckCircle className="h-3.5 w-3.5" />Schedule saved!</>
@@ -404,7 +404,7 @@ export function AskJarvisButton({ section }: { section: Section }) {
   return (
     <button
       onClick={() => openForSection(section)}
-      className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors"
+      className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-[#f27038]/10 hover:bg-[#f27038]/20 text-[#f27038] border border-[#f27038]/30 transition-colors"
     >
       <Bot className="h-3.5 w-3.5" />
       Ask JARVIS
@@ -436,7 +436,7 @@ export function JarvisDrawer() {
       {!isOpen && (
         <button
           onClick={() => openForSection(activeSection || "kpi_cards")}
-          className="fixed bottom-6 right-6 z-30 bg-gradient-to-br from-indigo-600 to-purple-700 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-105 transition-all"
+          className="fixed bottom-8 right-8 z-30 bg-gradient-to-br from-[#f27038] to-[#d4612e] text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-105 transition-all"
           title="Open JARVIS"
         >
           <span className="text-xl">🤖</span>

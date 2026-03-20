@@ -237,7 +237,7 @@ function Step3({
 
   const updateRow = (i: number, field: keyof LocationRow, value: string | number) => {
     const updated = [...locations];
-    (updated[i] as Record<string, unknown>)[field] = value;
+    (updated[i] as unknown as Record<string, unknown>)[field] = value;
     onLocationsChange(updated);
   };
 
