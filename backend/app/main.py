@@ -17,6 +17,7 @@ from app.routers.auth import router as auth_router
 from app.routers.reporting import router as reporting_router
 from app.routers.monthly_report import router as monthly_report_router
 from app.routers.jarvis import router as jarvis_router
+from app.routers.spend_report import router as spend_report_router
 
 settings = get_settings()
 
@@ -142,6 +143,7 @@ app.include_router(chat_router)
 app.include_router(microsoft_router)
 app.include_router(monthly_report_router)
 app.include_router(jarvis_router)
+app.include_router(spend_report_router)
 
 
 @app.get("/")

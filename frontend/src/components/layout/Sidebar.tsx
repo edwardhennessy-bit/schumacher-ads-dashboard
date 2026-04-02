@@ -14,6 +14,7 @@ import {
   Search,
   Monitor,
   FileText,
+  Receipt,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -48,6 +49,11 @@ const navItems = [
     label: "Reporting",
     href: "/reporting",
     icon: FileText,
+  },
+  {
+    label: "Spend Report",
+    href: "/spend-report",
+    icon: Receipt,
   },
   {
     label: "Audits",

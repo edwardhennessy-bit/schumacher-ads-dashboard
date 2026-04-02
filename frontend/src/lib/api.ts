@@ -437,6 +437,34 @@ class ApiClient {
     return this.fetch("/api/reports/history");
   }
 
+  // --- Spend Report ---
+  async generateSpendReport(params: {
+    googleHubspot: number;
+    microsoftHubspot: number;
+    metaHubspot: number;
+    month?: string;
+  }): Promise<{ job_id: string }> {
+    return this.fetch("/api/reports/spend-report/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        google_hubspot:    params.googleHubspot,
+        microsoft_hubspot: params.microsoftHubspot,
+        meta_hubspot:      params.metaHubspot,
+        month:             params.month || null,
+      }),
+    });
+  }
+
+  async getSpendReportStatus(jobId: string): Promise<{
+    job_id: string;
+    status: "queued" | "running" | "done" | "error" | "not_found";
+    logs: string;
+    url: string | null;
+    error: string | null;
+  }> {
+    return this.fetch(`/api/reports/spend-report/status/${jobId}`);
+  }
+
   async generateWeeklyKpiSection(startDate: string, endDate: string): Promise<{
     text: string;
     period_label: string;
