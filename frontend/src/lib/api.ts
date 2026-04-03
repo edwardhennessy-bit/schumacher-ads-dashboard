@@ -443,6 +443,7 @@ class ApiClient {
     microsoftHubspot: number;
     metaHubspot: number;
     month?: string;
+    locationNotes?: string;
   }): Promise<{ job_id: string }> {
     return this.fetch("/api/reports/spend-report/generate", {
       method: "POST",
@@ -451,6 +452,7 @@ class ApiClient {
         microsoft_hubspot: params.microsoftHubspot,
         meta_hubspot:      params.metaHubspot,
         month:             params.month || null,
+        location_notes:    params.locationNotes || null,
       }),
     });
   }

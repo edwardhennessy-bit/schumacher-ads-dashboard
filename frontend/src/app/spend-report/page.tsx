@@ -58,6 +58,8 @@ export default function SpendReportPage() {
   const [microsoftVal, setMicrosoftVal] = useState("");
   const [metaVal,      setMetaVal]      = useState("");
   const [monthOverride, setMonthOverride] = useState("");
+  const [locationChanged, setLocationChanged] = useState<boolean | null>(null);
+  const [locationNotes,   setLocationNotes]   = useState("");
 
   // Job state
   const [job, setJob] = useState<JobState | null>(null);
@@ -110,10 +112,15 @@ export default function SpendReportPage() {
   // Cleanup on unmount
   useEffect(() => () => stopPolling(), [stopPolling]);
 
+  const locationCheckComplete =
+    locationChanged === false ||
+    (locationChanged === true && locationNotes.trim().length > 0);
+
   const canGenerate =
     parseCurrency(googleVal) > 0 &&
     parseCurrency(microsoftVal) > 0 &&
     parseCurrency(metaVal) > 0 &&
+    locationCheckComplete &&
     (!job || job.status === "done" || job.status === "error");
 
   const isRunning = job?.status === "queued" || job?.status === "running";
@@ -130,6 +137,7 @@ export default function SpendReportPage() {
         microsoftHubspot: parseCurrency(microsoftVal),
         metaHubspot:      parseCurrency(metaVal),
         month:            monthOverride.trim() || undefined,
+        locationNotes:    locationNotes.trim() || undefined,
       });
 
       setJob({ jobId: job_id, status: "queued", logs: "", url: null, error: null });
@@ -152,6 +160,8 @@ export default function SpendReportPage() {
     setMicrosoftVal("");
     setMetaVal("");
     setMonthOverride("");
+    setLocationChanged(null);
+    setLocationNotes("");
   };
 
   // Extract current turn from logs
@@ -270,6 +280,55 @@ export default function SpendReportPage() {
                 onChange={e => setMonthOverride(e.target.value)}
                 className="w-full sm:w-64 rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
               />
+            </div>
+
+            {/* Location check */}
+            <div className="rounded-md border bg-muted/40 p-4 space-y-3">
+              <div>
+                <p className="text-sm font-medium">Location check</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Have any design center locations changed since last month?
+                  <span className="ml-1 text-muted-foreground">(new location, phased out, name change)</span>
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLocationChanged(false)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-all ${
+                    locationChanged === false
+                      ? "bg-green-50 border-green-300 text-green-700"
+                      : "bg-background border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  No changes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLocationChanged(true)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-all ${
+                    locationChanged === true
+                      ? "bg-amber-50 border-amber-300 text-amber-700"
+                      : "bg-background border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Yes, something changed
+                </button>
+              </div>
+              {locationChanged === true && (
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Describe the changes <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={locationNotes}
+                    onChange={e => setLocationNotes(e.target.value)}
+                    placeholder="e.g. Removed Port Arthur — location is fully phased out. Added Savannah as a standalone location."
+                    rows={3}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Error from previous run */}

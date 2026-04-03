@@ -36,7 +36,8 @@ class SpendReportRequest(BaseModel):
     google_hubspot: float
     microsoft_hubspot: float
     meta_hubspot: float
-    month: Optional[str] = None   # e.g. "March 2026"; omit to auto-detect prior month
+    month: Optional[str] = None           # e.g. "March 2026"; omit to auto-detect prior month
+    location_notes: Optional[str] = None  # any location changes the user described
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +53,7 @@ def _run_agent(job_id: str, request: SpendReportRequest, output_dir: Path) -> No
         sys.executable,
         str(SPEND_AGENT_SCRIPT),
         "--auto",
+        "--skip-location-check",           # location check handled by the dashboard UI
         "--google-hubspot",    str(request.google_hubspot),
         "--microsoft-hubspot", str(request.microsoft_hubspot),
         "--meta-hubspot",      str(request.meta_hubspot),
@@ -59,6 +61,8 @@ def _run_agent(job_id: str, request: SpendReportRequest, output_dir: Path) -> No
     ]
     if request.month:
         cmd += ["--month", request.month]
+    if request.location_notes:
+        cmd += ["--location-notes", request.location_notes]
 
     try:
         proc = subprocess.Popen(
