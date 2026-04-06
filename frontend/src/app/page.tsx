@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/mock-data";
 import { api, MetricsOverview } from "@/lib/api";
+import { BudgetTracker } from "@/components/dashboard/BudgetTracker";
 import {
   DateRange,
   DEFAULT_PRESET,
@@ -191,6 +192,12 @@ export default function OverviewPage() {
             />
           </div>
         </div>
+
+        {/* ── Budget Tracker ────────────────────────────────────── */}
+        <BudgetTracker
+          startDate={getActiveDateRange().startDate}
+          endDate={getActiveDateRange().endDate}
+        />
 
         {/* ── Meta ──────────────────────────────────────────────── */}
         <div>

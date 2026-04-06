@@ -15,6 +15,7 @@ import {
   Monitor,
   FileText,
   Receipt,
+  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -54,6 +55,11 @@ const navItems = [
     label: "Spend Report",
     href: "/spend-report",
     icon: Receipt,
+  },
+  {
+    label: "Budget Tracker",
+    href: "/budget-tracker",
+    icon: Gauge,
   },
   {
     label: "Audits",

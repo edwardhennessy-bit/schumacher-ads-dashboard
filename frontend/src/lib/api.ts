@@ -467,6 +467,55 @@ class ApiClient {
     return this.fetch(`/api/reports/spend-report/status/${jobId}`);
   }
 
+  // --- Budget Tracker ---
+  async getBudgetConfig(): Promise<{
+    google: { total: number; testing: number };
+    microsoft: { total: number; testing: number };
+    meta: { total: number; testing: number };
+  }> {
+    return this.fetch("/api/budget/config");
+  }
+
+  async saveBudgetConfig(config: {
+    google: { total: number; testing: number };
+    microsoft: { total: number; testing: number };
+    meta: { total: number; testing: number };
+  }): Promise<{ success: boolean; config: typeof config }> {
+    return this.fetch("/api/budget/config", {
+      method: "POST",
+      body: JSON.stringify(config),
+    });
+  }
+
+  async getBudgetStatus(startDate?: string, endDate?: string): Promise<{
+    start_date: string;
+    end_date: string;
+    pacing_factor: number;
+    days_elapsed: number;
+    days_in_month: number;
+    platforms: Record<string, {
+      budget: number;
+      testing_budget: number;
+      main_budget: number;
+      total_spend: number;
+      testing_spend: number;
+      main_spend: number;
+      remaining: number;
+      expected_spend: number;
+      pacing_factor: number;
+      pacing_status: "ahead" | "behind" | "on_track" | "no_budget";
+      testing_pacing_status: "ahead" | "behind" | "on_track" | "no_budget";
+      funnel: Record<string, { spend: number; campaign_count: number }>;
+      campaign_count: number;
+    }>;
+  }> {
+    const params = new URLSearchParams();
+    if (startDate) params.set("start_date", startDate);
+    if (endDate) params.set("end_date", endDate);
+    const qs = params.toString();
+    return this.fetch(`/api/budget/status${qs ? `?${qs}` : ""}`);
+  }
+
   async generateWeeklyKpiSection(startDate: string, endDate: string): Promise<{
     text: string;
     period_label: string;
