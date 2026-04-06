@@ -38,6 +38,7 @@ class BudgetConfig(BaseModel):
     google: PlatformBudget = PlatformBudget()
     microsoft: PlatformBudget = PlatformBudget()
     meta: PlatformBudget = PlatformBudget()
+    overall_testing_budget: float = 0.0
 
 
 # ── Config persistence ────────────────────────────────────────────────────────
@@ -53,6 +54,7 @@ def _load_config() -> dict:
         "google": {"total": 0.0, "testing": 0.0},
         "microsoft": {"total": 0.0, "testing": 0.0},
         "meta": {"total": 0.0, "testing": 0.0},
+        "overall_testing_budget": 0.0,
     }
 
 def _save_config(data: dict):
@@ -91,6 +93,14 @@ def _build_funnel(campaigns: list) -> dict:
         buckets[tag]["spend"] = round(buckets[tag]["spend"] + float(c.get("spend", 0)), 2)
         buckets[tag]["campaign_count"] += 1
     return buckets
+
+def _extract_testing_campaigns(campaigns: list, platform: str) -> list:
+    """Return individual testing campaign rows tagged with their platform."""
+    return [
+        {"platform": platform, "name": c.get("name", ""), "spend": round(float(c.get("spend", 0)), 2)}
+        for c in campaigns
+        if _classify(c.get("name", "")) == "testing" and float(c.get("spend", 0)) > 0
+    ]
 
 
 # ── Pacing helpers ────────────────────────────────────────────────────────────
@@ -259,6 +269,16 @@ async def get_budget_status(
         _fetch_meta(),
     )
 
+    # Cross-platform creative testing rollup
+    overall_testing_budget = float(config.get("overall_testing_budget", 0.0))
+    testing_campaigns = (
+        _extract_testing_campaigns(google_campaigns, "google")
+        + _extract_testing_campaigns(microsoft_campaigns, "microsoft")
+        + _extract_testing_campaigns(meta_campaigns, "meta")
+    )
+    testing_campaigns.sort(key=lambda c: c["spend"], reverse=True)
+    total_testing_spend = round(sum(c["spend"] for c in testing_campaigns), 2)
+
     return {
         "start_date": start_date,
         "end_date": end_date,
@@ -269,5 +289,13 @@ async def get_budget_status(
             "google": _platform_summary(config.get("google", {}), google_campaigns, pacing_factor),
             "microsoft": _platform_summary(config.get("microsoft", {}), microsoft_campaigns, pacing_factor),
             "meta": _platform_summary(config.get("meta", {}), meta_campaigns, pacing_factor),
+        },
+        "overall_testing": {
+            "budget": overall_testing_budget,
+            "total_spend": total_testing_spend,
+            "remaining": round(overall_testing_budget - total_testing_spend, 2),
+            "expected_spend": round(overall_testing_budget * pacing_factor, 2),
+            "pacing_status": _pacing_status(total_testing_spend, overall_testing_budget, pacing_factor),
+            "campaigns": testing_campaigns,
         },
     }

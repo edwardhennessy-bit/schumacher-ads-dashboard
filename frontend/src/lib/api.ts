@@ -472,6 +472,7 @@ class ApiClient {
     google: { total: number; testing: number };
     microsoft: { total: number; testing: number };
     meta: { total: number; testing: number };
+    overall_testing_budget: number;
   }> {
     return this.fetch("/api/budget/config");
   }
@@ -480,6 +481,7 @@ class ApiClient {
     google: { total: number; testing: number };
     microsoft: { total: number; testing: number };
     meta: { total: number; testing: number };
+    overall_testing_budget: number;
   }): Promise<{ success: boolean; config: typeof config }> {
     return this.fetch("/api/budget/config", {
       method: "POST",
@@ -508,6 +510,14 @@ class ApiClient {
       funnel: Record<string, { spend: number; campaign_count: number }>;
       campaign_count: number;
     }>;
+    overall_testing: {
+      budget: number;
+      total_spend: number;
+      remaining: number;
+      expected_spend: number;
+      pacing_status: "ahead" | "behind" | "on_track" | "no_budget";
+      campaigns: Array<{ platform: string; name: string; spend: number }>;
+    };
   }> {
     const params = new URLSearchParams();
     if (startDate) params.set("start_date", startDate);

@@ -46,6 +46,12 @@ interface PlatformStatus {
   campaign_count: number;
 }
 
+interface TestingCampaign {
+  platform: string;
+  name: string;
+  spend: number;
+}
+
 interface BudgetStatus {
   start_date: string;
   end_date: string;
@@ -56,6 +62,14 @@ interface BudgetStatus {
     google: PlatformStatus;
     microsoft: PlatformStatus;
     meta: PlatformStatus;
+  };
+  overall_testing: {
+    budget: number;
+    total_spend: number;
+    remaining: number;
+    expected_spend: number;
+    pacing_status: PacingStatus;
+    campaigns: TestingCampaign[];
   };
 }
 
@@ -68,6 +82,7 @@ interface BudgetForm {
   google: PlatformBudgetInput;
   microsoft: PlatformBudgetInput;
   meta: PlatformBudgetInput;
+  overall_testing: string;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -315,6 +330,7 @@ function BudgetConfigModal({
     google:    { total: "", testing: "" },
     microsoft: { total: "", testing: "" },
     meta:      { total: "", testing: "" },
+    overall_testing: "",
   });
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -325,6 +341,7 @@ function BudgetConfigModal({
         google:    { total: cfg.google.total > 0 ? String(cfg.google.total) : "", testing: cfg.google.testing > 0 ? String(cfg.google.testing) : "" },
         microsoft: { total: cfg.microsoft.total > 0 ? String(cfg.microsoft.total) : "", testing: cfg.microsoft.testing > 0 ? String(cfg.microsoft.testing) : "" },
         meta:      { total: cfg.meta.total > 0 ? String(cfg.meta.total) : "", testing: cfg.meta.testing > 0 ? String(cfg.meta.testing) : "" },
+        overall_testing: cfg.overall_testing_budget > 0 ? String(cfg.overall_testing_budget) : "",
       });
       setLoaded(true);
     }).catch(() => setLoaded(true));
@@ -341,6 +358,7 @@ function BudgetConfigModal({
         google:    { total: parseFloat(form.google.total) || 0,    testing: parseFloat(form.google.testing) || 0 },
         microsoft: { total: parseFloat(form.microsoft.total) || 0, testing: parseFloat(form.microsoft.testing) || 0 },
         meta:      { total: parseFloat(form.meta.total) || 0,      testing: parseFloat(form.meta.testing) || 0 },
+        overall_testing_budget: parseFloat(form.overall_testing) || 0,
       });
       onSaved();
       onClose();
@@ -396,7 +414,7 @@ function BudgetConfigModal({
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Testing Budget <span className="text-gray-600">(subset)</span></label>
+                    <label className="block text-xs text-gray-400 mb-1">Platform Testing <span className="text-gray-600">(subset)</span></label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
                       <input
@@ -411,6 +429,30 @@ function BudgetConfigModal({
                 </div>
               </div>
             ))
+          )}
+
+          {/* Overall creative testing budget — cross-platform */}
+          {loaded && (
+            <div className="border-t border-white/10 pt-5">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-amber-400" />
+                <h3 className="font-semibold text-white text-sm">Overall Creative Testing Budget</h3>
+                <span className="text-xs text-gray-500">— applies across all platforms</span>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">
+                Campaigns tagged with "TEST" on any platform roll up here. Set the total budget you have allocated for creative testing across Google, Microsoft, and Meta combined.
+              </p>
+              <div className="relative max-w-xs">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input
+                  type="number"
+                  placeholder="0"
+                  value={form.overall_testing}
+                  onChange={(e) => setForm((f) => ({ ...f, overall_testing: e.target.value }))}
+                  className="w-full pl-7 pr-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:border-amber-400 placeholder:text-gray-600"
+                />
+              </div>
+            </div>
           )}
         </div>
 
@@ -430,6 +472,95 @@ function BudgetConfigModal({
             {saving ? "Saving..." : "Save Budgets"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Creative Testing Section ──────────────────────────────────────────────────
+
+const PLATFORM_LABELS: Record<string, { label: string; color: string }> = {
+  google:    { label: "Google",    color: "text-green-400" },
+  microsoft: { label: "Microsoft", color: "text-[#f27038]" },
+  meta:      { label: "Meta",      color: "text-blue-400" },
+};
+
+function CreativeTestingSection({
+  testing,
+}: {
+  testing: BudgetStatus["overall_testing"];
+}) {
+  const spendPct = testing.budget > 0 ? Math.min((testing.total_spend / testing.budget) * 100, 100) : 0;
+  const hasCampaigns = testing.campaigns.length > 0;
+
+  return (
+    <div className="rounded-xl border border-amber-500/20 bg-[#252525] overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
+        <div className="flex items-center gap-2">
+          <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+          <h3 className="font-semibold text-white">Creative Testing</h3>
+          <span className="text-xs text-gray-500">cross-platform</span>
+        </div>
+        <PacingBadge status={testing.pacing_status} />
+      </div>
+
+      <div className="px-5 py-4 space-y-4">
+        {/* Budget vs spend */}
+        <div>
+          <div className="flex items-end justify-between mb-1.5">
+            <div>
+              <span className="text-2xl font-bold text-white">{formatCurrency(testing.total_spend)}</span>
+              {testing.budget > 0 && (
+                <span className="text-sm text-gray-400 ml-1.5">/ {formatCurrency(testing.budget)}</span>
+              )}
+            </div>
+            {testing.budget > 0 && (
+              <span className="text-sm font-medium text-gray-300">{spendPct.toFixed(1)}%</span>
+            )}
+          </div>
+          <ProgressBar
+            spend={testing.total_spend}
+            budget={testing.budget}
+            expected={testing.expected_spend}
+            color="bg-amber-400"
+          />
+          <div className="flex justify-between mt-1.5 text-xs text-gray-500">
+            <span>Expected today: {formatCurrency(testing.expected_spend)}</span>
+            {testing.budget > 0 && (
+              <span className={testing.remaining >= 0 ? "text-gray-400" : "text-red-400"}>
+                {testing.remaining >= 0
+                  ? `${formatCurrency(testing.remaining)} remaining`
+                  : `${formatCurrency(Math.abs(testing.remaining))} over budget`}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Campaign breakdown */}
+        {hasCampaigns ? (
+          <div>
+            <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">Campaigns identified</p>
+            <div className="space-y-1.5">
+              {testing.campaigns.map((c, i) => {
+                const pl = PLATFORM_LABELS[c.platform] ?? { label: c.platform, color: "text-gray-400" };
+                return (
+                  <div key={i} className="flex items-center justify-between py-1.5 px-3 rounded-lg bg-white/5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`text-xs font-semibold shrink-0 ${pl.color}`}>{pl.label}</span>
+                      <span className="text-sm text-gray-300 truncate">{c.name}</span>
+                    </div>
+                    <span className="text-sm font-medium text-white shrink-0 ml-3">{formatCurrency(c.spend)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500 italic">
+            No campaigns tagged with "TEST" found across platforms for this period.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -539,6 +670,9 @@ export function BudgetTracker({ startDate, endDate }: BudgetTrackerProps) {
                 />
               ))}
             </div>
+
+            {/* Creative Testing — cross-platform */}
+            <CreativeTestingSection testing={status.overall_testing} />
 
             {/* Funnel breakdown — collapsible */}
             <div>
